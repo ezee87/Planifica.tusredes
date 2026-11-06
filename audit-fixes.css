@@ -1,0 +1,33 @@
+/* Correcciones localizadas: conservar la composición y la paleta aprobadas. */
+html{scroll-padding-top:calc(var(--nav-height,82px) + 18px)}
+#como-funciona,#funcionalidades,#precio{scroll-margin-top:0}
+main:focus{outline:none}
+:where(a,button,summary,input,select,textarea):focus-visible{outline:3px solid #233d30;outline-offset:4px;box-shadow:0 0 0 7px #fafbf7}
+/* WCAG 2.2.2: el movimiento decorativo termina antes de cinco segundos. */
+@media(prefers-reduced-motion:no-preference){.hero::before,.hero::after{animation-duration:5s;animation-iteration-count:1;animation-fill-mode:forwards}}
+
+/* Ajustes finales solicitados: navegaci?n compacta y comparaci?n mobile. */
+#section-links{display:contents}.menu-toggle{display:none}.comparison-mobile{display:none}
+.value-total del{white-space:nowrap;flex-shrink:0}
+@media(max-width:800px){
+ .nav{flex-wrap:nowrap;justify-content:space-between;padding-block:0;gap:10px}
+ .nav .brand{white-space:nowrap;min-width:0}
+ .nav-links{flex-wrap:nowrap;gap:8px}
+ .menu-ready .menu-toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--cream);color:var(--ink);cursor:pointer}
+ .menu-ready #section-links{display:none;position:absolute;top:100%;left:0;right:0;padding:12px 20px;background:var(--cream);border-bottom:1px solid var(--line);box-shadow:0 8px 12px #233d3014;max-height:calc(100dvh - var(--nav-height,72px));overflow-y:auto}
+ .menu-ready .nav-links:has(.menu-toggle[aria-expanded="true"]) #section-links{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+ .nav-links #section-links a{min-height:44px}
+ /* Sin JS, conservar enlaces accesibles como alternativa. */
+ html:not(.menu-ready) .nav{flex-wrap:wrap}
+ html:not(.menu-ready) #section-links{display:flex;flex-wrap:wrap;gap:12px}
+ html:not(.menu-ready) .nav-links{flex-wrap:wrap}
+}
+@media(max-width:600px){
+ .comparison{display:none}.comparison-mobile{display:grid;gap:24px}
+ .comparison-group h3{font-size:15px;letter-spacing:0;line-height:1.5;margin:0 0 10px;font-weight:700}
+ .comparison-group ul{list-style:none;padding:0;margin:0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}
+ .comparison-group li{padding:16px 20px;font-size:14px;color:var(--muted)}
+ .comparison-group li+li{border-top:1px solid var(--line)}
+ .comparison-group:last-child ul{background:#f0f5ed}.comparison-group:last-child li{color:var(--ink)}
+}
+@media(max-width:360px){.nav .brand{font-size:0;gap:0}.nav .brand .logo{font-size:20px}.nav{min-height:68px}}

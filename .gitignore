@@ -1,0 +1,8 @@
+﻿.netlify/
+dist/
+node_modules/
+auditoria/
+*.zip
+.env
+.env.*
+!.env.example

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contacto y soporte | Planifica tus redes</title><meta name="description" content="Consultas, soporte y solicitudes de devolución de Planifica tus redes.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="contacto.css"><script src="contacto.js" defer></script></head>
+<body><a class="skip" href="#contenido">Ir al contenido</a><header><a class="brand" href="index.html"><span class="logo" aria-hidden="true">▦</span>Planifica tus redes</a></header>
+<main id="contenido" tabindex="-1"><h1>Contacto y soporte</h1><p>¿Tenés alguna consulta, necesitás ayuda con la aplicación o querés solicitar una devolución? Completá el formulario y te respondo por email.</p>
+<form name="contacto" method="POST" netlify netlify-honeypot="bot-field">
+<input type="hidden" name="form-name" value="contacto">
+<p hidden><label>No completar: <input name="bot-field" tabindex="-1" autocomplete="off"></label></p>
+<div class="field"><label for="nombre">Nombre <span>(opcional)</span></label><input id="nombre" name="nombre" type="text" maxlength="120" autocomplete="name"></div>
+<div class="field"><label for="email">Correo electrónico <span>(obligatorio)</span></label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" required></div>
+<div class="field"><label for="motivo">Motivo <span>(obligatorio)</span></label><select id="motivo" name="motivo" required><option value="">Seleccioná una opción</option><option>Consulta general</option><option>Soporte técnico</option><option>Solicitud de devolución</option><option>Arrepentimiento de compra</option></select></div>
+<div class="field"><label for="mensaje">Mensaje <span>(obligatorio)</span></label><textarea id="mensaje" name="mensaje" rows="4" maxlength="4000" required aria-describedby="sensitive-note"></textarea></div>
+<p id="sensitive-note" class="note">No envíes contraseñas, datos bancarios, números de tarjetas ni códigos de seguridad.</p>
+<button type="submit">Enviar consulta</button>
+</form><p id="form-status" role="status" aria-live="polite" tabindex="-1"></p>
+<p class="note">Primera respuesta dentro de las 48 horas.</p><a href="index.html">← Volver a la landing</a>
+</main></body></html>

@@ -1,0 +1,19 @@
+# Visor legal original; las reglas forzadas evitan el shadowing de los HTML antiguos.
+/legal/terminos.html /legal/terminos 301!
+/legal/terminos /legal/index.html 200!
+/legal/terminos/ /legal/index.html 200!
+/legal/licencia.html /legal/licencia 301!
+/legal/licencia /legal/index.html 200!
+/legal/licencia/ /legal/index.html 200!
+/legal/privacidad.html /legal/privacidad 301!
+/legal/privacidad /legal/index.html 200!
+/legal/privacidad/ /legal/index.html 200!
+/legal/devoluciones.html /legal/devoluciones 301!
+/legal/devoluciones /legal/index.html 200!
+/legal/devoluciones/ /legal/index.html 200!
+/legal/respaldos.html /legal/respaldos 301!
+/legal/respaldos /legal/index.html 200!
+/legal/respaldos/ /legal/index.html 200!
+/legal /legal/index.html 200!
+/arrepentimiento /contacto.html 301!
+/arrepentimiento/ /contacto.html 301!

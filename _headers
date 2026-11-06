@@ -1,0 +1,13 @@
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://analytics.tiktok.com 'sha256-8Z24vjb/dRIU8RtYix4xjOWrNIEFSYIFxF/DSziRYGo=' 'sha256-P54YIoCNyTrWwDaGweAH7rPxn9m9LnnZjqQ/CfduWyY=' 'sha256-J59HC5WrxvgnkFi0HmdCfD5v7psPflyAxuSPaeFT2CM=' 'sha256-ov1FjrxYn7tnqFIKlKdOp9PEe2zT6hlQZQBUL/KvWE8=' 'sha256-BkKP2XO6WOEc3kXOiLr2ZoY83hamalKjPY9xBcbXVuw='; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://analytics.tiktok.com https://analytics-ipv6.tiktokw.us; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cache-Control: public, max-age=0, must-revalidate
+
+/imagenes/*
+  Cache-Control: public, max-age=604800, must-revalidate
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
