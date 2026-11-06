@@ -7,7 +7,7 @@
     "test": "npm run build && node scripts/audit.cjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

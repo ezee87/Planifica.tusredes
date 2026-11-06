@@ -14,7 +14,7 @@
     }
     pending = true; button.disabled = true; form.setAttribute('aria-busy','true');
     try {
-      const response = await fetch('/', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form)).toString()});
+      const response = await fetch(location.hostname.endsWith('.netlify.app') ? '/' : '/api/contacto', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form)).toString()});
       if (!response.ok) throw new Error('Envío rechazado');
       form.reset(); form.hidden = true;
       status.textContent = 'Consulta recibida. Te responderé por email dentro de las próximas 48 horas.';

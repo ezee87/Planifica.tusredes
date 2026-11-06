@@ -3,12 +3,20 @@ const {chromium}=require('playwright');
 const {default:AxeBuilder}=require('@axe-core/playwright');
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'../dist'), output=path.resolve(__dirname,'../auditoria');fs.mkdirSync(output,{recursive:true});
-const headers=Object.fromEntries(fs.readFileSync(path.join(root,'_headers'),'utf8').split('\n').filter(l=>l.startsWith('  ')).map(l=>{const i=l.indexOf(':');return [l.slice(2,i),l.slice(i+1).trim()]}));
+const config=JSON.parse(fs.readFileSync(path.resolve(__dirname,'../vercel.json'),'utf8'));
+assert.equal(config.outputDirectory,'dist');
+const headers=Object.fromEntries(config.headers[0].headers.map(({key,value})=>[key,value]));
+const netlifyCsp=fs.readFileSync(path.join(root,'_headers'),'utf8').split('\n').find(l=>l.trim().startsWith('Content-Security-Policy:')).trim().slice('Content-Security-Policy: '.length);
+assert.equal(headers['Content-Security-Policy'],netlifyCsp,'Mantener sincronizada la CSP de Vercel y Netlify');
+assert.equal(config.rewrites.find(r=>r.source==='/api/contacto').destination,'https://planificatusredes.netlify.app/');
 const server=http.createServer((req,res)=>{
  let name=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
  if(req.method!=='GET'){res.writeHead(405);return res.end();}
- const rule=fs.readFileSync(path.join(root,'_redirects'),'utf8').split('\n').map(l=>l.trim().split(/\s+/)).find(x=>x[0]===name);
- if(rule){if(rule[2].startsWith('301')){res.writeHead(301,{Location:rule[1]});return res.end();}name=rule[1];}
+ if(name.length>1 && name.endsWith('/')){res.writeHead(308,{Location:name.slice(0,-1)});return res.end();}
+ const redirect=config.redirects.find(r=>r.source===name);
+ if(redirect){res.writeHead(308,{Location:redirect.destination});return res.end();}
+ const rewrite=config.rewrites.find(r=>r.source===name);
+ if(rewrite)name=rewrite.destination;
  if(name==='/')name='/index.html';
  const file=path.resolve(root,'.'+name);if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){console.log('404',name);res.writeHead(404);return res.end();}
  const type={'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript','.webp':'image/webp','.png':'image/png','.svg':'image/svg+xml'}[path.extname(file)];
@@ -70,7 +78,7 @@ const server=http.createServer((req,res)=>{
  }
  await page.locator('#nombre').fill('Prueba local');await page.locator('#email').fill('prueba@example.test');await page.locator('#motivo').selectOption({label:'Consulta general'});await page.locator('#mensaje').fill('Simulaci?n interceptada, sin env?o real.');
  let posts=0;let mode='error';
- await page.route('http://127.0.0.1:8766/',async route=>{
+ await page.route('http://127.0.0.1:8766/api/contacto',async route=>{
   assert.equal(route.request().method(),'POST');posts++;const body=new URLSearchParams(route.request().postData());
   assert.equal(body.get('form-name'),'contacto');for(const key of ['nombre','email','motivo','mensaje','bot-field'])assert(body.has(key));
   assert.equal(route.request().headers()['content-type'],'application/x-www-form-urlencoded');

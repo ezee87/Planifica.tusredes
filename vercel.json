@@ -1,0 +1,118 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "trailingSlash": false,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' https://analytics.tiktok.com 'sha256-8Z24vjb/dRIU8RtYix4xjOWrNIEFSYIFxF/DSziRYGo=' 'sha256-P54YIoCNyTrWwDaGweAH7rPxn9m9LnnZjqQ/CfduWyY=' 'sha256-J59HC5WrxvgnkFi0HmdCfD5v7psPflyAxuSPaeFT2CM=' 'sha256-ov1FjrxYn7tnqFIKlKdOp9PEe2zT6hlQZQBUL/KvWE8=' 'sha256-BkKP2XO6WOEc3kXOiLr2ZoY83hamalKjPY9xBcbXVuw='; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://analytics.tiktok.com https://analytics-ipv6.tiktokw.us; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/imagenes/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/fonts/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/legal/terminos.html",
+      "destination": "/legal/terminos",
+      "permanent": true
+    },
+    {
+      "source": "/legal/licencia.html",
+      "destination": "/legal/licencia",
+      "permanent": true
+    },
+    {
+      "source": "/legal/privacidad.html",
+      "destination": "/legal/privacidad",
+      "permanent": true
+    },
+    {
+      "source": "/legal/devoluciones.html",
+      "destination": "/legal/devoluciones",
+      "permanent": true
+    },
+    {
+      "source": "/legal/respaldos.html",
+      "destination": "/legal/respaldos",
+      "permanent": true
+    },
+    {
+      "source": "/arrepentimiento",
+      "destination": "/contacto.html",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/contacto",
+      "destination": "https://planificatusredes.netlify.app/"
+    },
+    {
+      "source": "/legal/terminos",
+      "destination": "/legal/index.html"
+    },
+    {
+      "source": "/legal/licencia",
+      "destination": "/legal/index.html"
+    },
+    {
+      "source": "/legal/privacidad",
+      "destination": "/legal/index.html"
+    },
+    {
+      "source": "/legal/devoluciones",
+      "destination": "/legal/index.html"
+    },
+    {
+      "source": "/legal/respaldos",
+      "destination": "/legal/index.html"
+    },
+    {
+      "source": "/legal",
+      "destination": "/legal/index.html"
+    }
+  ]
+}

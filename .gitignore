@@ -1,4 +1,4 @@
-﻿.netlify/
+.netlify/
 dist/
 node_modules/
 auditoria/
@@ -6,3 +6,5 @@ auditoria/
 .env
 .env.*
 !.env.example
+
+.vercel/
