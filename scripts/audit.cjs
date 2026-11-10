@@ -1,14 +1,33 @@
 // Dependencias de auditoría instaladas con npm ci.
 const {chromium}=require('playwright');
 const {default:AxeBuilder}=require('@axe-core/playwright');
-const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
+const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict'),{createHash}=require('node:crypto');
 const root=path.resolve(__dirname,'../dist'), output=path.resolve(__dirname,'../auditoria');fs.mkdirSync(output,{recursive:true});
 const config=JSON.parse(fs.readFileSync(path.resolve(__dirname,'../vercel.json'),'utf8'));
 assert.equal(config.outputDirectory,'dist');
 const headers=Object.fromEntries(config.headers[0].headers.map(({key,value})=>[key,value]));
-const netlifyCsp=fs.readFileSync(path.join(root,'_headers'),'utf8').split('\n').find(l=>l.trim().startsWith('Content-Security-Policy:')).trim().slice('Content-Security-Policy: '.length);
+const netlifyHeaders=fs.readFileSync(path.resolve(__dirname,'../_headers'),'utf8');
+const netlifyCsp=netlifyHeaders.split('\n').find(l=>l.trim().startsWith('Content-Security-Policy:')).trim().slice('Content-Security-Policy: '.length);
 assert.equal(headers['Content-Security-Policy'],netlifyCsp,'Mantener sincronizada la CSP de Vercel y Netlify');
 assert.equal(config.rewrites.find(r=>r.source==='/api/contacto').destination,'https://planificatusredes.netlify.app/');
+assert(netlifyHeaders.includes('X-Robots-Tag: noindex, follow'));
+assert(!headers['X-Robots-Tag'],'Vercel debe seguir siendo indexable');
+assert(!config.redirects.some(r=>r.source==='/'||r.source.includes(':path')),'No redirigir el receptor de formularios');
+const publicFiles=fs.readdirSync(root,{recursive:true}).filter(f=>fs.statSync(path.join(root,f)).isFile());
+for(const file of publicFiles){
+ assert(!/(^|[\\/])(?:\.|scripts|node_modules|auditoria|package(?:-lock)?\.json|vercel\.json|netlify\.toml|_headers|_redirects)/.test(file),'Archivo interno publicado: '+file);
+ assert(/\.(?:html|css|js|svg|webp|woff2|xml|txt)$/.test(file),'Extensión pública inesperada: '+file);
+ if(file.endsWith('.html')){
+  const html=fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n?/g,'\n');
+  assert(!html.includes('https://planificatusredes.netlify.app'),'Enlace público antiguo: '+file);
+  for(const match of html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi))assert(netlifyCsp.includes("'sha256-"+createHash('sha256').update(match[1]).digest('base64')+"'"),'Hash CSP faltante: '+file);
+ }
+}
+const canonicalOrigin='https://planificatusredes-steel.vercel.app';
+const sitemap=fs.readFileSync(path.join(root,'sitemap.xml'),'utf8');
+const sitemapUrls=[...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m=>m[1]);
+assert.equal(sitemapUrls.length,7);assert.equal(new Set(sitemapUrls).size,7);
+assert(fs.readFileSync(path.join(root,'robots.txt'),'utf8').includes('Sitemap: '+canonicalOrigin+'/sitemap.xml'));
 const server=http.createServer((req,res)=>{
  let name=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
  if(req.method!=='GET'){res.writeHead(405);return res.end();}
@@ -19,11 +38,22 @@ const server=http.createServer((req,res)=>{
  if(rewrite)name=rewrite.destination;
  if(name==='/')name='/index.html';
  const file=path.resolve(root,'.'+name);if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){console.log('404',name);res.writeHead(404);return res.end();}
- const type={'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript','.webp':'image/webp','.png':'image/png','.svg':'image/svg+xml'}[path.extname(file)];
- res.writeHead(200,{...headers,'Content-Type':type||'text/plain'});res.end(fs.readFileSync(file));
+ const type={'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript','.webp':'image/webp','.png':'image/png','.svg':'image/svg+xml','.woff2':'font/woff2','.xml':'application/xml','.txt':'text/plain'}[path.extname(file)];
+ const assetRule=config.headers.find(r=>r.source==='/'+name.split('/')[1]+'/:path*');
+ const assetHeaders=Object.fromEntries((assetRule?.headers||[]).map(({key,value})=>[key,value]));
+ res.writeHead(200,{...headers,...assetHeaders,'Content-Type':type||'text/plain'});res.end(fs.readFileSync(file));
 });
-(async()=>{await new Promise(r=>server.listen(8766,'127.0.0.1',r));const browser=await chromium.launch({channel:'chrome',headless:true});
+let auditBrowser;
+(async()=>{await new Promise(r=>server.listen(8766,'127.0.0.1',r));const browser=auditBrowser=await chromium.launch({channel:'chrome',headless:true});
  const context=await browser.newContext({reducedMotion:'reduce'}),page=await context.newPage(),errors=[],results=[];
+ // Ninguna prueba puede alcanzar un servicio externo ni enviar un POST real.
+ const isolate=async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(url.origin==='http://127.0.0.1:8766'&&request.method()==='GET')return route.continue();
+  if(url.origin==='https://analytics.tiktok.com'&&request.method()==='GET')return route.fulfill({contentType:'application/javascript',body:'/* Pixel aislado durante la auditoría local. */'});
+  return route.abort('blockedbyclient');
+ };
+ await context.route('**/*',isolate);
  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!m.location().url.endsWith('/favicon.ico'))errors.push(m.text())});
  await page.goto('http://127.0.0.1:8766/contacto.html');
  for(const width of [320,375,393,430,768,1280,1440]){
@@ -61,8 +91,23 @@ const server=http.createServer((req,res)=>{
  await page.locator('summary').first().focus();await page.keyboard.press('Shift+Tab');assert(!(await page.locator(':focus').evaluate(e=>e.tagName==='SUMMARY')));
  const hrefs=await page.locator('a').evaluateAll(links=>links.map(l=>l.getAttribute('href')));
  for(const href of hrefs.filter(h=>h.startsWith('#')))assert.equal(await page.locator(href).count(),1);
+ assert.deepEqual(hrefs.filter(h=>h.startsWith('https:')),['https://soporte-planificatusredes.systeme.io/checkout-arg','https://soporte-planificatusredes.systeme.io/checkout']);
+ assert.equal(await page.locator('form[name=planifica-soporte],form[name=planifica-reclamos]').count(),0);
+ assert.equal(await page.locator('meta[property="og:image"]').getAttribute('content'),canonicalOrigin+'/imagenes/contenido.webp');
+ for(const url of sitemapUrls){
+  assert(url.startsWith(canonicalOrigin+'/'));
+  const response=await page.goto('http://127.0.0.1:8766'+new URL(url).pathname);assert.equal(response.status(),200);
+  assert.equal(await page.locator('link[rel=canonical]').getAttribute('href'),url);
+  assert.equal(await page.locator('meta[property="og:url"]').getAttribute('content'),url);
+  for(const [key,value] of Object.entries(headers))assert.equal(response.headers()[key.toLowerCase()],value);
+ }
+ for(const file of publicFiles)assert.equal((await page.request.get('http://127.0.0.1:8766/'+file.replaceAll('\\','/'))).status(),200);
  for(const slug of ['terminos','licencia','privacidad','devoluciones','respaldos']){
   for(const suffix of ['', '/', '.html']){const r=await page.goto('http://127.0.0.1:8766/legal/'+slug+suffix);assert.equal(r.status(),200);assert.equal(await page.locator('main h1').count(),1);}
+  const legacy=fs.readFileSync(path.join(root,'legal',slug+'.html'),'utf8');
+  const legacyText=await page.evaluate(html=>Array.from(new DOMParser().parseFromString(html,'text/html').querySelector('main').querySelectorAll('h1,h2,h3,p,li'),el=>el.textContent.replace(/\s+/g,' ').trim()),legacy);
+  const currentText=await page.locator('.legal-document').evaluate(el=>Array.from(el.querySelectorAll('h1,h2,h3,p,li'),node=>node.textContent.replace(/\s+/g,' ').trim()));
+  assert.deepEqual(currentText,legacyText,'Versiones legales coherentes: '+slug);
   const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze();results.push({legal:slug,violations:axe.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))}))});
  }
  await page.goto('http://127.0.0.1:8766/arrepentimiento');assert.equal(await page.locator('form').count(),1);await page.locator('button[type=submit]').click();assert.equal(await page.locator(':focus').getAttribute('id'),'email');
@@ -70,24 +115,33 @@ const server=http.createServer((req,res)=>{
  const form=page.locator('form[name=contacto]');assert.equal(await form.getAttribute('method'),'POST');assert.equal(await form.getAttribute('netlify'),'');
  assert.equal(await page.locator('[name=form-name]').inputValue(),'contacto');assert(await page.locator('[name=bot-field]').isHidden());
  await page.locator('button[type=submit]').click();assert.equal(await page.locator(':focus').getAttribute('id'),'email');
+ assert.equal(await form.getAttribute('netlify-honeypot'),'bot-field');
  await page.goto('http://127.0.0.1:8766/contacto.html');
  for(const width of [320,375,393,430,768,1280,1440]){
   await page.setViewportSize({width,height:900});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze();results.push({contact:width,violations:axe.violations.map(v=>v.id)});
   await page.screenshot({path:path.join(output,`contacto-${width}.png`),fullPage:true});
  }
- await page.locator('#nombre').fill('Prueba local');await page.locator('#email').fill('prueba@example.test');await page.locator('#motivo').selectOption({label:'Consulta general'});await page.locator('#mensaje').fill('Simulaci?n interceptada, sin env?o real.');
- let posts=0;let mode='error';
+ assert.deepEqual(errors,[],'Sin errores de carga o ejecución antes de simular fallos de red');
+ await page.locator('#nombre').fill('Prueba local');await page.locator('#email').fill('prueba@example.test');await page.locator('#motivo').selectOption({label:'Consulta general'});await page.locator('#mensaje').fill('Simulación interceptada: ñ, á, + & =; sin envío real.');
+ let posts=0;let mode=422;
  await page.route('http://127.0.0.1:8766/api/contacto',async route=>{
   assert.equal(route.request().method(),'POST');posts++;const body=new URLSearchParams(route.request().postData());
   assert.equal(body.get('form-name'),'contacto');for(const key of ['nombre','email','motivo','mensaje','bot-field'])assert(body.has(key));
+  assert.equal(body.get('nombre'),'Prueba local');assert.equal(body.get('email'),'prueba@example.test');assert.equal(body.get('motivo'),'Consulta general');assert.equal(body.get('mensaje'),'Simulación interceptada: ñ, á, + & =; sin envío real.');assert.equal(body.get('bot-field'),'');
   assert.equal(route.request().headers()['content-type'],'application/x-www-form-urlencoded');
-  await new Promise(r=>setTimeout(r,150));await route.fulfill({status:mode==='error'?422:200,body:'Respuesta local simulada'});
+  await new Promise(r=>setTimeout(r,150));
+  if(mode==='network')return route.abort('failed');
+  await route.fulfill({status:mode,body:'Respuesta local simulada'});
  });
  await page.locator('button[type=submit]').click();await page.waitForFunction(()=>document.querySelector('#form-status').textContent.includes('No se pudo'));assert(await form.isVisible());assert.equal(posts,1);
- mode='success';await page.locator('button[type=submit]').click();await form.evaluate(f=>f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true})));await page.waitForFunction(()=>document.querySelector('#form-status').textContent.includes('Consulta recibida'));assert.equal(posts,2);assert(await form.isHidden());
- results.push({form:'HTML static, native validation, mocked 422/200, fields and duplicate protection passed; no real POST'});
- results.push({keyboard:'skip, 11 FAQ Enter/Space, Shift+Tab, native invalid email',links:hrefs,errors});
+ for(const failure of [500,'network']){mode=failure;await page.locator('button[type=submit]').click();await page.waitForFunction(()=>document.querySelector('#form-status').textContent.includes('No se pudo'));assert(await form.isVisible());assert.equal(await page.locator('#email').inputValue(),'prueba@example.test');assert(!await page.locator('button[type=submit]').isDisabled());}
+ mode=200;await page.locator('button[type=submit]').click();await form.evaluate(f=>f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true})));await page.waitForFunction(()=>document.querySelector('#form-status').textContent.includes('Consulta recibida'));assert.equal(posts,4);assert(await form.isHidden());
+ const noJs=await browser.newContext({javaScriptEnabled:false});await noJs.route('**/*',isolate);const fallback=await noJs.newPage();await fallback.goto('http://127.0.0.1:8766/contacto.html');assert(await fallback.locator('form').isHidden());assert(await fallback.locator('noscript a[href="mailto:soporte.planificatusredes@gmail.com"]').isVisible());await noJs.close();
+ results.push({form:'Campos completos, honeypot, validación, errores 422/500/red, éxito 200 y duplicados comprobados; respaldo sin JavaScript por correo. Sin POST real.',seo:sitemapUrls,publicFiles});
+ assert(errors.every(message=>/^Failed to load resource: (?:the server responded with a status of (?:422|500) |net::ERR_FAILED)/.test(message)),'Solo errores de red simulados');
+ assert(results.every(result=>!result.violations?.length),'Sin infracciones de accesibilidad en las vistas comprobadas');
+ results.push({keyboard:'skip, 11 FAQ Enter/Space, Shift+Tab, native invalid email',links:hrefs,expectedFormErrors:errors});
  fs.writeFileSync(path.join(output,'resultados.json'),JSON.stringify(results,null,2));
  console.log(JSON.stringify(results));await browser.close();server.close();
-})().catch(e=>{console.error(e);server.close();process.exit(1)});
+})().catch(async e=>{console.error(e);await auditBrowser?.close();server.close();process.exit(1)});

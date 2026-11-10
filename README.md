@@ -24,8 +24,12 @@ No se versionan compilaciones, archivos ZIP, informes de auditoría, credenciale
 
 ## Publicación en Vercel
 
-`vercel.json` define el framework estático, `npm run build`, la salida `dist`, las rutas legales y las cabeceras de seguridad. Node.js queda fijado en 22.x. Hacer push a `main` dispara el despliegue si la integración Git está activa; desplegar el último commit, no repetir el despliegue del commit anterior.
+La landing usa `https://planificatusredes-steel.vercel.app/`; la aplicación es un proyecto independiente. `vercel.json` define el framework estático, `npm run build -- --vercel`, la salida `dist`, las rutas legales y las cabeceras de seguridad. Node.js queda fijado en 22.x. Hacer push a `main` dispara el despliegue si la integración Git está activa; desplegar el último commit, no repetir el despliegue del commit anterior.
 
 El formulario usa `/api/contacto`, una reescritura hacia el receptor existente en `https://planificatusredes.netlify.app/`. Mantener ese sitio y Netlify Forms activos, con el formulario `contacto` y sus notificaciones configuradas. En el dominio original de Netlify se conserva el POST directo. Las pruebas interceptan los envíos: no verifican entrega real de correo.
 
-Las cabeceras de Vercel deben mantenerse sincronizadas con `_headers`; si cambia un script inline, ejecutar el build y actualizar sus hashes en `vercel.json` antes del commit. Vercel no interpreta `_headers` ni `_redirects`.
+El build local sincroniza automáticamente los hashes CSP de `_headers` y `vercel.json`. Ejecutarlo antes de preparar los cambios para Vercel. Como Vercel lee su configuración antes del build, el build remoto falla si detecta hashes obsoletos. La salida para Vercel excluye `_headers` y `_redirects`; `npm run build` conserva la salida compatible con Netlify.
+
+Canonical, Open Graph, sitemap y robots usan el nuevo dominio. `_headers` añade `X-Robots-Tag: noindex, follow` exclusivamente en Netlify, sin redirigir ni bloquear el receptor de formularios; se aplicará cuando se actualice ese sitio. No configurar redirecciones generales sobre el receptor.
+
+Sin JavaScript, contacto muestra el correo de soporte y oculta el formulario para evitar un POST a una página estática. Las pruebas cubren errores HTTP, fallas de red, éxito, campos, honeypot y envíos duplicados con respuestas simuladas; no prueban recepción real ni correo.

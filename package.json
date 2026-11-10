@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "npm run build && node scripts/audit.cjs"
+    "test": "npm run build -- --vercel && node scripts/audit.cjs"
   },
   "engines": {
     "node": "22.x"
