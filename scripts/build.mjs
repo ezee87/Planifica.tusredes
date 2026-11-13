@@ -20,7 +20,8 @@ for(const file of files.filter(x=>x.endsWith('.html'))){
 // Netlify inyecta el badge público dentro de un iframe srcdoc que hereda esta CSP.
 // Autorizar solo su contenido exacto evita el error sin permitir scripts inline genéricos.
 hashes.add("'sha256-BkKP2XO6WOEc3kXOiLr2ZoY83hamalKjPY9xBcbXVuw='");
-const csp=`default-src 'self'; script-src 'self' https://analytics.tiktok.com ${[...hashes].join(' ')}; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://analytics.tiktok.com https://analytics-ipv6.tiktokw.us; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests`;
+// GA4: etiqueta oficial y recolección estándar/regional, sin dominios de publicidad.
+const csp=`default-src 'self'; script-src 'self' https://analytics.tiktok.com https://www.googletagmanager.com ${[...hashes].join(' ')}; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com; font-src 'self'; connect-src 'self' https://analytics.tiktok.com https://analytics-ipv6.tiktokw.us https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests`;
 const configPath=resolve(root,'vercel.json');
 const config=JSON.parse(readFileSync(configPath,'utf8'));
 const vercelCsp=config.headers.find(rule=>rule.source==='/(.*)').headers.find(header=>header.key==='Content-Security-Policy');
