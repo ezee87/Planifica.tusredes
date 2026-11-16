@@ -8,3 +8,6 @@ auditoria/
 !.env.example
 
 .vercel/
+
+# Respaldos sin pérdida de las imágenes optimizadas: se conservan localmente, no se versionan.
+imagenes/originales/

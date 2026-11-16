@@ -74,6 +74,9 @@ let auditBrowser;
  assert(cspDirectives['script-src'].includes('https://www.googletagmanager.com'));
  assert(!cspDirectives['script-src'].some(value=>['*',"'unsafe-inline'","'unsafe-eval'"].includes(value)));
  for(const directive of ['img-src','connect-src'])for(const origin of ['https://www.googletagmanager.com','https://www.google-analytics.com','https://region1.google-analytics.com'])assert(cspDirectives[directive].includes(origin),'CSP de GA4: '+directive+' '+origin);
+ // Respaldo oficial de gtag.js (/g/collect en www.google.com): host exacto, sin comodines de Google.
+ assert(cspDirectives['connect-src'].includes('https://www.google.com'),'CSP de GA4: connect-src https://www.google.com');
+ for(const directive of Object.keys(cspDirectives))assert(!cspDirectives[directive].some(value=>/^https:\/\/\*\.google\./.test(value)),'Sin comodines de Google en '+directive);
  for(const origin of ['https://www.clarity.ms','https://scripts.clarity.ms'])assert(cspDirectives['script-src'].includes(origin),'Scripts de Clarity: '+origin);
  for(const directive of ['img-src','connect-src'])assert(cspDirectives[directive].includes('https://*.clarity.ms'),'Recolección regional de Clarity: '+directive);
  assert(cspDirectives['img-src'].includes('https://c.bing.com'),'Imagen de sincronización de Clarity');
