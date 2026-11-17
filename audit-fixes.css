@@ -6,8 +6,8 @@ main:focus{outline:none}
 /* WCAG 2.2.2: el movimiento decorativo termina antes de cinco segundos. */
 @media(prefers-reduced-motion:no-preference){.hero::before,.hero::after{animation-duration:5s;animation-iteration-count:1;animation-fill-mode:forwards}}
 
-/* Ajustes finales solicitados: navegaci?n compacta y comparaci?n mobile. */
-#section-links{display:contents}.menu-toggle{display:none}.comparison-mobile{display:none}
+/* Ajustes finales solicitados: navegación compacta. */
+#section-links{display:contents}.menu-toggle{display:none}
 .value-total del{white-space:nowrap;flex-shrink:0}
 @media(max-width:800px){
  .nav{flex-wrap:nowrap;justify-content:space-between;padding-block:0;gap:10px}
@@ -22,12 +22,5 @@ main:focus{outline:none}
  html:not(.menu-ready) #section-links{display:flex;flex-wrap:wrap;gap:12px}
  html:not(.menu-ready) .nav-links{flex-wrap:wrap}
 }
-@media(max-width:600px){
- .comparison{display:none}.comparison-mobile{display:grid;gap:24px}
- .comparison-group h3{font-size:15px;letter-spacing:0;line-height:1.5;margin:0 0 10px;font-weight:700}
- .comparison-group ul{list-style:none;padding:0;margin:0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}
- .comparison-group li{padding:16px 20px;font-size:14px;color:var(--muted)}
- .comparison-group li+li{border-top:1px solid var(--line)}
- .comparison-group:last-child ul{background:#f0f5ed}.comparison-group:last-child li{color:var(--ink)}
-}
+
 @media(max-width:360px){.nav .brand{font-size:0;gap:0}.nav .brand .logo{font-size:20px}.nav{min-height:68px}}

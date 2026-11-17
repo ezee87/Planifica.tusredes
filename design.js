@@ -10,20 +10,56 @@
     update();
   }
 
+  // Video del hero. La portada (cuadro 0) es el LCP y se ve desde el primer render;
+  // el video se pide recién después de "load" para no competir con la carga inicial.
+  // Con movimiento reducido o ahorro de datos se queda la imagen estática.
+  const media = document.querySelector('.hero-media');
+  const video = media && media.querySelector('.hero-video');
+  if (video) {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+    const saveData = Boolean(navigator.connection && navigator.connection.saveData);
+    const toggle = media.querySelector('.hero-media-toggle');
+    let pausedByUser = false;
+    const setPaused = paused => {
+      media.classList.toggle('is-paused', paused);
+      toggle.setAttribute('aria-label', paused ? 'Reproducir la demostración' : 'Pausar la demostración');
+    };
+    const play = () => { const p = video.play(); if (p) p.catch(() => {}); };
+    const start = () => {
+      if (reduce.matches || saveData) return;
+      if (!video.dataset.ready) {
+        video.dataset.ready = '1';
+        video.muted = true;
+        video.querySelectorAll('source[data-src]').forEach(source => { source.src = source.dataset.src; });
+        video.load();
+        // El botón aparece solo cuando hay algo que pausar.
+        video.addEventListener('playing', () => { toggle.hidden = false; setPaused(false); }, {once: true});
+      }
+      if (!pausedByUser) play();
+    };
+    toggle.addEventListener('click', () => {
+      pausedByUser = !video.paused;
+      if (pausedByUser) { video.pause(); setPaused(true); } else { play(); setPaused(false); }
+    });
+    reduce.addEventListener('change', () => {
+      if (reduce.matches) { video.pause(); setPaused(true); } else start();
+    });
+    if (document.readyState === 'complete') start();
+    else window.addEventListener('load', start, {once: true});
+  }
+
   if (!('IntersectionObserver' in window) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
   // Cada grupo escalona sus elementos para que entren en secuencia.
   const groups = [
     ['main section:not(.hero) .section-heading'],
-    ['.comparison', '.comparison-group'],
-    ['.demo-item'],
-    ['.features-heading'],
     ['.feature'],
     ['.step'],
     ['#como-funciona .wrap > .button'],
     ['.offer .purchase'],
-    ['.offer-extra > h3', '.offer-extra > .product-description', '.offer-extra > .included'],
+    ['.bonus-heading'],
     ['.offer-bonuses .bonus'],
+    ['.guarantee-card'],
     ['.faq details'],
     ['.final .wrap > *']
   ];
