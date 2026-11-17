@@ -52,29 +52,100 @@
 // (misma pestaña) y los agrega a los enlaces de checkout de Systeme.io. Solo se tocan esos
 // enlaces; se usa set() para no duplicar y se conservan los parámetros propios del destino.
 // Se aplica al cargar, así también funcionan Ctrl+clic, clic central y "abrir en pestaña nueva".
+// También agrega ga_client_id y ga_session_id, leídos solo con gtag('get') (nunca de la URL).
+// Como llegan de forma asíncrona, los enlaces se reescriben al recibirlos; si un clic normal
+// ocurre antes, se espera como máximo GA_WAIT_MS y se navega igual. Sin GA no se agrega nada.
 (() => {
   'use strict';
   const KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'ttclid', 'fbclid', 'gclid'];
   const STORAGE_KEY = 'ptr_attribution';
   const MAX_LENGTH = 500;
+  const GA_ID = 'G-CMX0YC67EN';
+  const GA_FIELDS = {client_id: ['ga_client_id', /^\d+\.\d+$/], session_id: ['ga_session_id', /^\d+$/]};
+  const GA_WAIT_MS = 1000;
   let stored = {};
   try { stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { stored = {}; }
   const attribution = {};
   KEYS.forEach(key => { if (typeof stored[key] === 'string' && stored[key]) attribution[key] = stored[key]; });
+  Object.values(GA_FIELDS).forEach(([key, format]) => { if (format.test(stored[key])) attribution[key] = stored[key]; });
   const incoming = new URLSearchParams(location.search);
   KEYS.forEach(key => {
     const value = (incoming.get(key) || '').trim();
     if (value && value.length <= MAX_LENGTH) attribution[key] = value;
   });
-  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(attribution)); } catch (e) { /* sin storage: solo esta página */ }
-  if (!Object.keys(attribution).length) return;
+  const save = () => { try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(attribution)); } catch (e) { /* sin storage: solo esta página */ } };
+  save();
 
+  // Enlaces de checkout con su href original, para reconstruirlos siempre desde el destino real.
+  const checkouts = new Map();
   document.querySelectorAll('a[href]').forEach(link => {
     let url;
     try { url = new URL(link.getAttribute('href'), location.href); } catch (e) { return; }
     if (url.protocol !== 'https:' || !url.hostname.endsWith('.systeme.io') || !url.pathname.startsWith('/checkout')) return;
+    checkouts.set(link, url.href);
+  });
+  const apply = link => {
+    const url = new URL(checkouts.get(link));
     Object.keys(attribution).forEach(key => url.searchParams.set(key, attribution[key]));
-    link.href = url.href;
+    if (link.href !== url.href) link.href = url.href;
+  };
+  const applyAll = () => checkouts.forEach((_, link) => apply(link));
+  applyAll();
+
+  // Identificadores de GA4. Si gtag.js no carga o no responde, el callback nunca llega.
+  // Sin consentimiento de analytics_storage, gtag('get') devuelve un client_id temporal que no
+  // se guarda: por eso solo se aceptan valores que coinciden con las cookies propias de GA4.
+  const gaCookies = () => {
+    const jar = {};
+    document.cookie.split(';').forEach(part => { const i = part.indexOf('='); jar[part.slice(0, i).trim()] = part.slice(i + 1).trim(); });
+    return {
+      client_id: (jar._ga || '').split('.').slice(2).join('.'),
+      session_id: ((jar['_ga_' + GA_ID.slice(2)] || '').match(/^GS\d\.\d\.s?(\d+)/) || [])[1] || ''
+    };
+  };
+  let gaPending = 0;
+  const waiters = [];
+  if (typeof window.gtag === 'function') {
+    Object.keys(GA_FIELDS).forEach(field => {
+      const [key, format] = GA_FIELDS[field];
+      gaPending++;
+      try {
+        window.gtag('get', GA_ID, field, value => {
+          // Valor ausente, inválido o no persistido: no se inventa ni se reutiliza uno anterior.
+          const id = String(value);
+          if (format.test(id) && id === gaCookies()[field]) attribution[key] = id; else delete attribution[key];
+          save();
+          applyAll();
+          if (--gaPending === 0) waiters.splice(0).forEach(fn => fn());
+        });
+      } catch (e) { gaPending--; }
+    });
+  }
+  const hasGaIds = () => Object.values(GA_FIELDS).every(([key]) => attribution[key]);
+  const gaLoaded = () => Boolean(window.google_tag_manager && window.google_tag_manager[GA_ID]);
+
+  let navigating = false;
+  document.addEventListener('click', event => {
+    const link = event.target.closest && event.target.closest('a[href]');
+    if (!link || !checkouts.has(link) || event.defaultPrevented) return;
+    if (navigating) { event.preventDefault(); return; }
+    // Ctrl/Shift/Cmd+clic abren otra pestaña o ventana: no se pueden demorar; usan lo disponible.
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (!gaPending || hasGaIds()) return;
+    // Página cargada y gtag.js ausente: GA está bloqueado, no tiene sentido esperar.
+    if (document.readyState === 'complete' && !gaLoaded()) return;
+    event.preventDefault();
+    navigating = true;
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      navigating = false;
+      apply(link);
+      location.assign(link.href);
+    };
+    waiters.push(go);
+    setTimeout(go, GA_WAIT_MS);
   });
 })();
 
