@@ -1,3 +1,53 @@
+// Inicio de compra: begin_checkout (GA4) e InitiateCheckout (TikTok) al hacer clic en un
+// enlace de checkout de Systeme.io. Precio y moneda salen de los data-checkout-* de cada enlace,
+// junto al texto visible. Nunca se frena la navegación: si la analítica falla, el enlace sigue.
+// Va antes del menú para que un error allí no impida medir.
+(() => {
+  'use strict';
+  const PRODUCT_ID = 'planifica_tus_redes';
+  const PRODUCT_NAME = 'Planifica tus redes';
+  const DEDUPE_MS = 2000; // ignora el doble clic, permite reintentos posteriores
+  const lastClick = new WeakMap();
+
+  document.addEventListener('click', event => {
+    if (!event.isTrusted) return;
+    const link = event.target.closest && event.target.closest('a[data-checkout]');
+    if (!link) return;
+    const now = Date.now();
+    if (now - (lastClick.get(link) || 0) < DEDUPE_MS) return;
+    lastClick.set(link, now);
+
+    const method = link.dataset.checkout;
+    const currency = link.dataset.checkoutCurrency;
+    const value = Number(link.dataset.checkoutValue);
+    if (!method || !currency || !Number.isFinite(value)) return;
+    const eventId = 'ic_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+
+    try {
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', 'begin_checkout', {
+          currency,
+          value,
+          payment_method: method,
+          items: [{item_id: PRODUCT_ID, item_name: PRODUCT_NAME, price: value, currency, quantity: 1}]
+        });
+      }
+    } catch (e) { /* la analítica nunca bloquea el pago */ }
+
+    try {
+      if (window.ttq && typeof window.ttq.track === 'function') {
+        window.ttq.track('InitiateCheckout', {
+          contents: [{content_id: PRODUCT_ID, content_type: 'product', content_name: PRODUCT_NAME, quantity: 1, price: value}],
+          content_type: 'product',
+          value,
+          currency,
+          payment_method: method
+        }, {event_id: eventId});
+      }
+    } catch (e) { /* la analítica nunca bloquea el pago */ }
+  });
+})();
+
 (() => {
   'use strict';
   const toggle = document.querySelector('.menu-toggle');
