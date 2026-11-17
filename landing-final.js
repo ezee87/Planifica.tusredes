@@ -48,6 +48,36 @@
   });
 })();
 
+// Atribución: conserva UTM e identificadores de clic de la URL de entrada en sessionStorage
+// (misma pestaña) y los agrega a los enlaces de checkout de Systeme.io. Solo se tocan esos
+// enlaces; se usa set() para no duplicar y se conservan los parámetros propios del destino.
+// Se aplica al cargar, así también funcionan Ctrl+clic, clic central y "abrir en pestaña nueva".
+(() => {
+  'use strict';
+  const KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'ttclid', 'fbclid', 'gclid'];
+  const STORAGE_KEY = 'ptr_attribution';
+  const MAX_LENGTH = 500;
+  let stored = {};
+  try { stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { stored = {}; }
+  const attribution = {};
+  KEYS.forEach(key => { if (typeof stored[key] === 'string' && stored[key]) attribution[key] = stored[key]; });
+  const incoming = new URLSearchParams(location.search);
+  KEYS.forEach(key => {
+    const value = (incoming.get(key) || '').trim();
+    if (value && value.length <= MAX_LENGTH) attribution[key] = value;
+  });
+  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(attribution)); } catch (e) { /* sin storage: solo esta página */ }
+  if (!Object.keys(attribution).length) return;
+
+  document.querySelectorAll('a[href]').forEach(link => {
+    let url;
+    try { url = new URL(link.getAttribute('href'), location.href); } catch (e) { return; }
+    if (url.protocol !== 'https:' || !url.hostname.endsWith('.systeme.io') || !url.pathname.startsWith('/checkout')) return;
+    Object.keys(attribution).forEach(key => url.searchParams.set(key, attribution[key]));
+    link.href = url.href;
+  });
+})();
+
 (() => {
   'use strict';
   const toggle = document.querySelector('.menu-toggle');
