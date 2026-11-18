@@ -2,12 +2,15 @@
 // enlace de checkout de Systeme.io. Precio y moneda salen de los data-checkout-* de cada enlace,
 // junto al texto visible. Nunca se frena la navegación: si la analítica falla, el enlace sigue.
 // Va antes del menú para que un error allí no impida medir.
+// Cada evento exige el consentimiento vigente de su categoría (consent.js): sin él no se envía,
+// aunque la herramienta se haya cargado antes en la misma página.
 (() => {
   'use strict';
   const PRODUCT_ID = 'planifica_tus_redes';
   const PRODUCT_NAME = 'Planifica tus redes';
   const DEDUPE_MS = 2000; // ignora el doble clic, permite reintentos posteriores
   const lastClick = new WeakMap();
+  const consent = () => (window.ptrConsent ? window.ptrConsent.get() : {analytics: false, ads: false});
 
   document.addEventListener('click', event => {
     if (!event.isTrusted) return;
@@ -22,9 +25,10 @@
     const value = Number(link.dataset.checkoutValue);
     if (!method || !currency || !Number.isFinite(value)) return;
     const eventId = 'ic_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+    const granted = consent();
 
     try {
-      if (typeof window.gtag === 'function') {
+      if (granted.analytics && typeof window.gtag === 'function') {
         window.gtag('event', 'begin_checkout', {
           currency,
           value,
@@ -35,7 +39,7 @@
     } catch (e) { /* la analítica nunca bloquea el pago */ }
 
     try {
-      if (window.ttq && typeof window.ttq.track === 'function') {
+      if (granted.ads && window.ttq && typeof window.ttq.track === 'function') {
         window.ttq.track('InitiateCheckout', {
           contents: [{content_id: PRODUCT_ID, content_type: 'product', content_name: PRODUCT_NAME, quantity: 1, price: value}],
           content_type: 'product',
@@ -55,25 +59,50 @@
 // También agrega ga_client_id y ga_session_id, leídos solo con gtag('get') (nunca de la URL).
 // Como llegan de forma asíncrona, los enlaces se reescriben al recibirlos; si un clic normal
 // ocurre antes, se espera como máximo GA_WAIT_MS y se navega igual. Sin GA no se agrega nada.
+// Consentimiento (consent.js), revisado en cada cambio:
+// - Las UTM se conservan siempre: son necesarias para registrar el origen comercial de la compra.
+// - ttclid, fbclid y gclid solo se guardan y transmiten con consentimiento publicitario; hasta
+//   entonces quedan en memoria (los de la URL actual) y nunca en el almacenamiento.
+// - ga_client_id y ga_session_id solo con consentimiento analítico.
+// - ad_consent=granted solo con consentimiento publicitario vigente; nunca se guarda.
 (() => {
   'use strict';
-  const KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'ttclid', 'fbclid', 'gclid'];
+  const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+  const AD_KEYS = ['ttclid', 'fbclid', 'gclid'];
   const STORAGE_KEY = 'ptr_attribution';
   const MAX_LENGTH = 500;
   const GA_ID = 'G-CMX0YC67EN';
   const GA_FIELDS = {client_id: ['ga_client_id', /^\d+\.\d+$/], session_id: ['ga_session_id', /^\d+$/]};
   const GA_WAIT_MS = 1000;
+  const AD_CONSENT_PARAM = 'ad_consent';
+  const AD_CONSENT_GRANTED = 'granted';
+  const consent = () => (window.ptrConsent ? window.ptrConsent.get() : {analytics: false, ads: false});
+
   let stored = {};
   try { stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { stored = {}; }
-  const attribution = {};
-  KEYS.forEach(key => { if (typeof stored[key] === 'string' && stored[key]) attribution[key] = stored[key]; });
-  Object.values(GA_FIELDS).forEach(([key, format]) => { if (format.test(stored[key])) attribution[key] = stored[key]; });
   const incoming = new URLSearchParams(location.search);
-  KEYS.forEach(key => {
+  const fromUrl = {};
+  UTM_KEYS.concat(AD_KEYS).forEach(key => {
     const value = (incoming.get(key) || '').trim();
-    if (value && value.length <= MAX_LENGTH) attribution[key] = value;
+    if (value && value.length <= MAX_LENGTH) fromUrl[key] = value;
   });
+  const attribution = {};
+  const restore = keys => keys.forEach(key => {
+    if (typeof stored[key] === 'string' && stored[key]) attribution[key] = stored[key];
+    if (fromUrl[key]) attribution[key] = fromUrl[key];
+  });
+  const initial = consent();
+  restore(UTM_KEYS);
+  if (initial.ads) restore(AD_KEYS);
+  if (initial.analytics) Object.values(GA_FIELDS).forEach(([key, format]) => { if (format.test(stored[key])) attribution[key] = stored[key]; });
+  // Quita lo que el consentimiento vigente no permite (también lo guardado antes de revocar).
+  const enforce = () => {
+    const granted = consent();
+    if (!granted.ads) AD_KEYS.forEach(key => delete attribution[key]);
+    if (!granted.analytics) Object.values(GA_FIELDS).forEach(([key]) => delete attribution[key]);
+  };
   const save = () => { try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(attribution)); } catch (e) { /* sin storage: solo esta página */ } };
+  enforce();
   save();
 
   // Enlaces de checkout con su href original, para reconstruirlos siempre desde el destino real.
@@ -87,14 +116,14 @@
   const apply = link => {
     const url = new URL(checkouts.get(link));
     Object.keys(attribution).forEach(key => url.searchParams.set(key, attribution[key]));
+    if (consent().ads) url.searchParams.set(AD_CONSENT_PARAM, AD_CONSENT_GRANTED);
     if (link.href !== url.href) link.href = url.href;
   };
   const applyAll = () => checkouts.forEach((_, link) => apply(link));
   applyAll();
 
   // Identificadores de GA4. Si gtag.js no carga o no responde, el callback nunca llega.
-  // Sin consentimiento de analytics_storage, gtag('get') devuelve un client_id temporal que no
-  // se guarda: por eso solo se aceptan valores que coinciden con las cookies propias de GA4.
+  // Solo se aceptan valores que coinciden con las cookies propias de GA4 (nunca un id temporal).
   const gaCookies = () => {
     const jar = {};
     document.cookie.split(';').forEach(part => { const i = part.indexOf('='); jar[part.slice(0, i).trim()] = part.slice(i + 1).trim(); });
@@ -104,8 +133,14 @@
     };
   };
   let gaPending = 0;
+  let gaRequested = false;
   const waiters = [];
-  if (typeof window.gtag === 'function') {
+  const release = () => { if (gaPending === 0) waiters.splice(0).forEach(fn => fn()); };
+  // Se piden una vez por página: al cargar o cuando se acepta después (consent.js carga GA4
+  // antes de avisar el cambio, así gtag ya existe). Una revocación recarga la página.
+  const requestGaIds = () => {
+    if (gaRequested || !consent().analytics || typeof window.gtag !== 'function') return;
+    gaRequested = true;
     Object.keys(GA_FIELDS).forEach(field => {
       const [key, format] = GA_FIELDS[field];
       gaPending++;
@@ -113,16 +148,30 @@
         window.gtag('get', GA_ID, field, value => {
           // Valor ausente, inválido o no persistido: no se inventa ni se reutiliza uno anterior.
           const id = String(value);
-          if (format.test(id) && id === gaCookies()[field]) attribution[key] = id; else delete attribution[key];
+          if (consent().analytics && format.test(id) && id === gaCookies()[field]) attribution[key] = id; else delete attribution[key];
           save();
           applyAll();
-          if (--gaPending === 0) waiters.splice(0).forEach(fn => fn());
+          gaPending--;
+          release();
         });
-      } catch (e) { gaPending--; }
+      } catch (e) { gaPending--; release(); }
+    });
+  };
+  requestGaIds();
+
+  if (window.ptrConsent) {
+    window.ptrConsent.onChange(granted => {
+      if (granted.ads) AD_KEYS.forEach(key => { if (fromUrl[key]) attribution[key] = fromUrl[key]; });
+      enforce();
+      save();
+      applyAll();
+      requestGaIds();
     });
   }
+
   const hasGaIds = () => Object.values(GA_FIELDS).every(([key]) => attribution[key]);
-  const gaLoaded = () => Boolean(window.google_tag_manager && window.google_tag_manager[GA_ID]);
+  // gtag.js no pudo descargarse (bloqueador o red): no tiene sentido esperar.
+  const gaBlocked = () => Boolean(window.ptrConsent && window.ptrConsent.gaStatus() === 'error');
 
   let navigating = false;
   document.addEventListener('click', event => {
@@ -131,9 +180,7 @@
     if (navigating) { event.preventDefault(); return; }
     // Ctrl/Shift/Cmd+clic abren otra pestaña o ventana: no se pueden demorar; usan lo disponible.
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    if (!gaPending || hasGaIds()) return;
-    // Página cargada y gtag.js ausente: GA está bloqueado, no tiene sentido esperar.
-    if (document.readyState === 'complete' && !gaLoaded()) return;
+    if (!gaPending || hasGaIds() || !consent().analytics || gaBlocked()) return;
     event.preventDefault();
     navigating = true;
     let done = false;

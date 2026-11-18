@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 const root=resolve(import.meta.dirname,'..');
 const forVercel=process.env.VERCEL==='1'||process.argv.includes('--vercel');
-const files=['index.html','commercial.js','commercial.css','audit-fixes.css','landing-final.js','design.css','design.js','contacto.html','contacto.css','contacto.js','favicon-32.png','favicon-192.png','apple-touch-icon.png','robots.txt','sitemap.xml',
+const files=['index.html','commercial.js','commercial.css','audit-fixes.css','consent.js','consent.css','landing-final.js','design.css','design.js','contacto.html','contacto.css','contacto.js','favicon-32.png','favicon-192.png','apple-touch-icon.png','robots.txt','sitemap.xml',
  ...readdirSync(resolve(root,'legal')).filter(x=>/\.(html|css)$/.test(x)).map(x=>'legal/'+x),
  ...readdirSync(resolve(root,'imagenes')).filter(x=>/\.webp$/.test(x)).map(x=>'imagenes/'+x),
  ...readdirSync(resolve(root,'fonts')).filter(x=>/\.woff2$/.test(x)).map(x=>'fonts/'+x),

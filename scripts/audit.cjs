@@ -59,19 +59,15 @@ let auditBrowser;
  };
  await context.route('**/*',isolate);
  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!m.location().url.endsWith('/favicon.ico'))errors.push(m.text())});
+ const trackerHosts=/(^|\.)(googletagmanager\.com|google-analytics\.com|tiktok\.com|tiktokw\.us|clarity\.ms)$/;
+ const mainTrackerRequests=[];page.on('request',r=>{if(trackerHosts.test(new URL(r.url()).hostname))mainTrackerRequests.push(r.url());});
  await page.goto('http://127.0.0.1:8766/');
- assert.equal(await page.locator('script[src*="clarity.ms/tag/"]').count(),1,'Una sola etiqueta de Clarity');
- assert.equal(await page.locator('script[src*="clarity.ms/tag/"]').getAttribute('src'),'https://www.clarity.ms/tag/zcrndukdg8');
- assert(await page.locator('script[src*="clarity.ms/tag/"]').evaluate(script=>script.async&&script.parentElement===document.head));
- assert.equal(await page.evaluate(()=>typeof window.clarity),'function','Clarity convive con GA4 y TikTok');
- assert.equal(await page.locator('script[src*="/gtag/js"]').count(),1,'Una sola etiqueta de GA4');
- assert.equal(await page.locator('script[src*="/gtm.js"]').count(),0,'Sin Google Tag Manager');
- assert.equal(await page.locator('script[src*="/gtag/js"]').getAttribute('src'),'https://www.googletagmanager.com/gtag/js?id=G-CMX0YC67EN');
- assert.equal(await page.locator('script[src*="/gtag/js"]').getAttribute('async'),'');
- assert.deepEqual(await page.evaluate(()=>window.dataLayer.map(entry=>Array.from(entry)).filter(entry=>entry[0]==='config')),[['config','G-CMX0YC67EN']],'Una sola configuración: page_view automático');
- assert(await page.evaluate(()=>window.dataLayer.some(entry=>entry[0]==='js'&&entry[1] instanceof Date)));
- assert.deepEqual(await page.evaluate(()=>Object.keys(window.ttq._i)),['DBMH8CJC77U4J2JR0CI0'],'Conservar el píxel de TikTok');
- assert.equal(await page.evaluate(()=>window.ttq.filter(entry=>entry[0]==='page').length),1);
+ // Consentimiento básico: en la primera visita no se descarga ni se ejecuta ninguna herramienta de medición.
+ assert(await page.locator('#cookie-banner').isVisible(),'Primera visita: banner de cookies visible');
+ assert.equal(await page.locator('script[src*="clarity.ms"],script[src*="/gtag/js"],script[src*="tiktok.com"],script[src*="/gtm.js"]').count(),0,'Sin etiquetas de medición antes del consentimiento');
+ assert.deepEqual(await page.evaluate(()=>[typeof window.gtag,typeof window.ttq,typeof window.clarity,typeof window.dataLayer]),['undefined','undefined','undefined','undefined'],'Sin GA4, TikTok ni Clarity antes del consentimiento');
+ assert.deepEqual(await page.locator('script[src]').evaluateAll(s=>s.map(e=>e.getAttribute('src'))),['consent.js','landing-final.js','design.js'],'Solo scripts propios al cargar');
+ assert(await page.locator('[data-consent-open]').isVisible(),'Enlace «Configurar cookies» en el pie');
  const cspDirectives=Object.fromEntries(netlifyCsp.split(';').map(part=>part.trim().split(/\s+/)).map(([name,...values])=>[name,values]));
  assert(cspDirectives['script-src'].includes('https://www.googletagmanager.com'));
  assert(!cspDirectives['script-src'].some(value=>['*',"'unsafe-inline'","'unsafe-eval'"].includes(value)));
@@ -214,6 +210,7 @@ let auditBrowser;
   const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze();results.push({contact:width,violations:axe.violations.map(v=>v.id)});
   await page.screenshot({path:path.join(output,`contacto-${width}.png`),fullPage:true});
  }
+ assert.deepEqual(mainTrackerRequests,[],'Sin decisión de cookies no hubo ninguna solicitud a GA4, TikTok ni Clarity');
  assert.deepEqual(errors,[],'Sin errores de carga o ejecución antes de simular fallos de red');
  await page.locator('#nombre').fill('Prueba local');await page.locator('#email').fill('prueba@example.test');await page.locator('#motivo').selectOption({label:'Consulta general'});await page.locator('#mensaje').fill('Simulación interceptada: ñ, á, + & =; sin envío real.');
  let posts=0;let mode=422;
@@ -250,6 +247,229 @@ let auditBrowser;
  const motionAxe=await new AxeBuilder({page:mp}).include('.hero').withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze();results.push({video:'reproducción',violations:motionAxe.violations.map(v=>v.id)});
  assert.deepEqual(motionErrors,[]);assert(!motionAxe.violations.length,'Sin infracciones con el video en reproducción: '+JSON.stringify(motionAxe.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>[n.target,n.failureSummary])}))));
  await motion.close();
+ // ---------- Consentimiento de cookies (consent.js + landing-final.js) ----------
+ // Herramientas simuladas: GA4 guarda sus cookies y responde gtag('get'); TikTok y Clarity guardan
+ // sus cookies. El checkout de Systeme.io se responde localmente: nada sale de la máquina.
+ {
+  const LANDING='http://127.0.0.1:8766/';
+  const SYSTEME='https://soporte-planificatusredes.systeme.io';
+  const GA_TAG='https://www.googletagmanager.com/gtag/js?id=G-CMX0YC67EN';
+  const CLIENT_ID='1617605705.1794937607',SESSION_ID='1794937607',TTCLID='E.C.P.CtYBPruebaSimulada0123456789';
+  const QUERY='?utm_source=tiktok&utm_medium=paid&utm_campaign=lanzamiento&ttclid='+TTCLID+'&fbclid=fb_prueba_123&gclid=gc_prueba_123';
+  const fakeGa=delay=>`(function(){document.cookie='_ga=GA1.1.${CLIENT_ID}; path=/';document.cookie='_ga_CMX0YC67EN=GS2.1.s${SESSION_ID}$o1$g0$t${SESSION_ID}$j60$l0$h0; path=/';
+var v={client_id:'${CLIENT_ID}',session_id:'${SESSION_ID}'},dl=window.dataLayer;function h(a){if(a&&a[0]==='get'&&typeof a[3]==='function')setTimeout(function(){a[3](v[a[2]])},${delay})}
+for(var i=0;i<dl.length;i++)h(dl[i]);var p=dl.push;dl.push=function(){for(var j=0;j<arguments.length;j++)h(arguments[j]);return p.apply(dl,arguments)};window.google_tag_manager={'G-CMX0YC67EN':{}};})();`;
+  const FAKE_TT="document.cookie='_ttp=simulado; path=/';document.cookie='_tt_enable_cookie=1; path=/';sessionStorage.setItem('tt_sessionId','simulado');";
+  const FAKE_CLARITY="document.cookie='_clck=simulado; path=/';document.cookie='_clsk=simulado; path=/';";
+  let gaMode={delay:50};
+  const trackerRequests=[],checkoutVisits=[];
+  const consentRoute=async route=>{
+   const request=route.request(),url=new URL(request.url());
+   if(trackerHosts.test(url.hostname))trackerRequests.push(url.href);
+   if(url.origin===SYSTEME&&request.method()==='GET'){checkoutVisits.push(url.href);return route.fulfill({contentType:'text/html',body:'<!doctype html><title>Checkout simulado</title>'});}
+   if(url.href===GA_TAG&&request.method()==='GET')return gaMode.block?route.abort('blockedbyclient'):route.fulfill({contentType:'application/javascript',body:fakeGa(gaMode.delay)});
+   if(url.origin==='https://analytics.tiktok.com'&&request.method()==='GET')return route.fulfill({contentType:'application/javascript',body:FAKE_TT});
+   if(url.href==='https://www.clarity.ms/tag/zcrndukdg8'&&request.method()==='GET')return route.fulfill({contentType:'application/javascript',body:FAKE_CLARITY});
+   return isolate(route);
+  };
+  const ctx=await browser.newContext({reducedMotion:'reduce',viewport:{width:390,height:844}});await ctx.route('**/*',consentRoute);
+  const cp=await ctx.newPage();const consentErrors=[];
+  cp.on('pageerror',e=>consentErrors.push(e.message));cp.on('console',m=>{if(m.type()==='error'&&!m.location().url.endsWith('/favicon.ico'))consentErrors.push(m.text()+' @ '+m.location().url)});
+  const params=href=>Object.fromEntries(new URL(href).searchParams);
+  const state=page=>page.evaluate(()=>{
+   const dl=(window.dataLayer||[]).map(e=>Array.from(e));
+   return {
+    globals:[typeof window.gtag,typeof window.ttq,typeof window.clarity],
+    scripts:[...document.scripts].map(s=>s.src).filter(s=>/googletagmanager|tiktok|clarity/.test(s)),
+    configs:dl.filter(e=>e[0]==='config').length,
+    consentOrder:dl.filter(e=>['consent','js','config'].includes(e[0])).map(e=>e[0]==='consent'?e[0]+':'+e[1]+':'+e[2].analytics_storage:e[0]),
+    ttPages:Array.isArray(window.ttq)?window.ttq.filter(e=>e[0]==='page').length:0,
+    ttTracks:Array.isArray(window.ttq)?window.ttq.filter(e=>e[0]==='track').length:0,
+    beginCheckouts:dl.filter(e=>e[0]==='event'&&e[1]==='begin_checkout').length,
+    banner:!document.getElementById('cookie-banner').hidden,
+    cookies:document.cookie,
+    stored:(()=>{try{return JSON.parse(localStorage.getItem('ptr_consent'))}catch(e){return 'error'}})(),
+    attribution:(()=>{try{return sessionStorage.getItem('ptr_attribution')||''}catch(e){return ''}})(),
+    links:[...document.querySelectorAll('a[data-checkout]')].map(a=>a.href)
+   };
+  });
+  const reset=async()=>{await ctx.clearCookies();await cp.goto(LANDING);await cp.evaluate(()=>{localStorage.clear();sessionStorage.clear();});trackerRequests.length=0;checkoutVisits.length=0;gaMode={delay:50};};
+  const openSettings=async()=>{await cp.locator('[data-consent-open]').click();assert(await cp.locator('#cookie-prefs').isVisible());assert(await cp.locator('#cookie-analytics').evaluate(e=>e===document.activeElement),'El foco pasa a la primera opción');};
+  const saveChoice=async(analytics,ads,{reload=false}={})=>{
+   await openSettings();await cp.locator('#cookie-analytics').setChecked(analytics);await cp.locator('#cookie-ads').setChecked(ads);
+   const save=cp.locator('[data-consent="save"]');
+   if(reload)await Promise.all([cp.waitForEvent('load'),save.click()]);else await save.click();
+   await cp.waitForTimeout(250);
+  };
+  // Clic en un checkout sin salir de la página (para contar eventos); solo con los identificadores ya disponibles.
+  const clickWithoutLeaving=async selector=>{
+   await cp.evaluate(()=>{window.__stay=e=>{if(e.target.closest('a[data-checkout]'))e.preventDefault()};window.addEventListener('click',window.__stay);});
+   await cp.locator(selector).click();await cp.evaluate(()=>window.removeEventListener('click',window.__stay));
+  };
+  const base=href=>{const u=new URL(href);return u.origin+u.pathname;};
+  const CHECKOUTS=[SYSTEME+'/checkout-arg',SYSTEME+'/checkout'];
+  const assertLink=(href,{ga,ads},label)=>{
+    const p=params(href);
+    assert.equal(p.utm_source,'tiktok','UTM conservadas: '+label);assert.equal(p.utm_medium,'paid');assert.equal(p.utm_campaign,'lanzamiento');
+    for(const key of ['ttclid','fbclid','gclid'])assert.equal(key in p,ads,key+' según consentimiento publicitario: '+label);
+    if(ads){assert.equal(p.ttclid,TTCLID);assert.equal(p.ad_consent,'granted');}else assert(!('ad_consent' in p),'Sin ad_consent: '+label);
+    if(ga){assert.equal(p.ga_client_id,CLIENT_ID);assert.equal(p.ga_session_id,SESSION_ID);}else assert(!('ga_client_id' in p)&&!('ga_session_id' in p),'Sin identificadores GA4: '+label);
+  };
+  const assertLinks=(s,opts,label)=>{
+   assert.deepEqual(s.links.map(base),CHECKOUTS,'Destinos de checkout intactos: '+label);
+   s.links.forEach(href=>assertLink(href,opts,label));
+  };
+  const NONE=['undefined','undefined','undefined'];
+
+  // 1, 11 y 13. Primera visita con UTM y ttclid: banner, nada cargado, solo UTM en el checkout.
+  await reset();await cp.goto(LANDING+QUERY);await cp.waitForTimeout(400);
+  let s=await state(cp);
+  assert(s.banner&&s.stored===null,'Primera visita: banner y sin decisión');
+  assert.deepEqual(s.globals,NONE);assert.deepEqual(s.scripts,[]);assert.deepEqual(trackerRequests,[],'Sin solicitudes de medición antes del consentimiento');
+  assert(!/_ga|_ttp|_clck/.test(s.cookies),'Sin cookies de medición');
+  assertLinks(s,{ga:false,ads:false},'primera visita');
+  assert(!/ttclid|fbclid|gclid|ga_/.test(s.attribution)&&/utm_source/.test(s.attribution),'Solo UTM en sessionStorage');
+  assert(await cp.evaluate(()=>document.activeElement===document.body),'El banner no roba el foco');
+  assert.equal(await cp.locator('[data-consent="accept"]').evaluate(e=>getComputedStyle(e).backgroundColor),await cp.locator('[data-consent="reject"]').evaluate(e=>getComputedStyle(e).backgroundColor),'Aceptar y rechazar con la misma prominencia');
+  for(const width of [320,390,768,1280]){
+   await cp.setViewportSize({width,height:width<800?740:800});await cp.waitForTimeout(100);
+   const box=await cp.locator('.cookie-card').boundingBox();assert(box.x>=0&&box.x+box.width<=width&&box.y>=0,'Banner dentro de la pantalla: '+width);
+   assert(await cp.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Sin desplazamiento horizontal con banner: '+width);
+   for(const b of await cp.locator('.cookie-actions .cookie-btn:visible').all())assert((await b.boundingBox()).height>=44,'Botones táctiles de 44 px: '+width);
+   await cp.screenshot({path:path.join(output,`cookies-banner-${width}.png`)});
+  }
+  await cp.setViewportSize({width:320,height:640});
+  await cp.locator('[data-consent="configure"]').click();assert(await cp.locator('#cookie-analytics').evaluate(e=>e===document.activeElement&&!e.checked));
+  assert.equal(await cp.locator('#cookie-ads').isChecked(),false,'Categorías opcionales desactivadas por defecto');
+  const prefsBox=await cp.locator('.cookie-card').boundingBox();assert(prefsBox.height<=640-20,'Configuración dentro de la pantalla en 320 px');
+  await cp.screenshot({path:path.join(output,'cookies-configurar-320.png')});
+  const consentAxe=await new AxeBuilder({page:cp}).include('#cookie-banner').withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze();
+  assert.deepEqual(consentAxe.violations.map(v=>v.id),[],'Banner sin infracciones de accesibilidad');
+  await cp.setViewportSize({width:390,height:844});
+
+  // 3. Rechazar todas: nada se carga, la elección se guarda y el checkout lleva solo UTM.
+  await cp.goto(LANDING+QUERY);await cp.locator('[data-consent="reject"]').click();await cp.waitForTimeout(300);
+  s=await state(cp);
+  assert(!s.banner&&s.stored.v===1&&s.stored.analytics===false&&s.stored.ads===false&&!isNaN(Date.parse(s.stored.ts)),'Rechazo guardado con versión y fecha');
+  assert(await cp.evaluate(()=>document.activeElement===document.getElementById('contenido')),'Tras decidir, el foco pasa al contenido');
+  assert.deepEqual(s.globals,NONE);assert.deepEqual(trackerRequests,[]);assertLinks(s,{ga:false,ads:false},'rechazo');
+  await Promise.all([cp.waitForURL(SYSTEME+'/**'),cp.locator('a[data-checkout="mercado_pago"]').click()]);
+  assert.equal(base(checkoutVisits.at(-1)),CHECKOUTS[0]);assertLink(checkoutVisits.at(-1),{ga:false,ads:false},'navegación tras rechazo');
+  // 9. Recarga con la preferencia guardada: sin banner y sin herramientas.
+  await cp.goto(LANDING+QUERY);await cp.waitForTimeout(300);s=await state(cp);
+  assert(!s.banner&&s.globals.join()===NONE.join()&&trackerRequests.length===0,'Recarga con rechazo guardado');
+
+  // 4. Solo analíticas (desde «Configurar cookies»): GA4 y Clarity, sin TikTok; sin recargar.
+  let loads=0;const countLoads=()=>loads++;cp.on('load',countLoads);
+  await saveChoice(true,false);await cp.waitForTimeout(300);
+  s=await state(cp);
+  assert.equal(loads,0,'Aceptar no recarga la página');
+  assert.deepEqual(s.globals,['function','undefined','function']);
+  assert.deepEqual(s.scripts,[GA_TAG,'https://www.clarity.ms/tag/zcrndukdg8'],'Una etiqueta de GA4 y una de Clarity');
+  assert.deepEqual(s.consentOrder,['consent:default:denied','consent:update:granted','js','config'],'Consentimiento predeterminado antes de inicializar GA4');
+  assert(await cp.evaluate(()=>[...document.scripts].filter(e=>/googletagmanager|clarity/.test(e.src)).every(e=>e.async&&e.parentElement===document.head)));
+  assert(!trackerRequests.some(u=>/tiktok/.test(u)),'Sin solicitudes a TikTok');
+  assertLinks(s,{ga:true,ads:false},'solo analíticas');
+  assert(/_ga=/.test(s.cookies)&&!/_ttp/.test(s.cookies));
+  await clickWithoutLeaving('a[data-checkout="paypal"]');s=await state(cp);
+  assert.equal(s.beginCheckouts,1,'begin_checkout con consentimiento analítico');assert.equal(s.ttTracks,0);
+
+  // 5 y 6. Solo publicitarias: revocar analíticas recarga, limpia GA4/Clarity y carga solo TikTok.
+  await saveChoice(false,true,{reload:true});s=await state(cp);
+  assert.deepEqual(s.globals,['undefined','object','undefined'],'Tras revocar analíticas: sin GA4 ni Clarity');
+  assert.equal(s.configs,0);assert(!/_ga|_clck|_clsk/.test(s.cookies),'Cookies de GA4 y Clarity eliminadas');
+  assert(!/ga_client_id|ga_session_id/.test(s.attribution),'Identificadores GA4 eliminados del almacenamiento');
+  assert.equal(s.scripts.length,1);assert.match(s.scripts[0],/^https:\/\/analytics\.tiktok\.com\/i18n\/pixel\/events\.js\?sdkid=DBMH8CJC77U4J2JR0CI0/);
+  assert.deepEqual(await cp.evaluate(()=>Object.keys(window.ttq._i)),['DBMH8CJC77U4J2JR0CI0'],'Píxel de TikTok configurado');
+  assert.equal(s.ttPages,1,'Un solo page de TikTok');
+  assertLinks(s,{ga:false,ads:true},'solo publicitarias');assert(new RegExp(TTCLID).test(s.attribution),'ttclid conservado con consentimiento');
+  await clickWithoutLeaving('a[data-checkout="mercado_pago"]');s=await state(cp);
+  assert.equal(s.ttTracks,1,'InitiateCheckout con consentimiento publicitario');assert.equal(s.beginCheckouts,0,'Sin begin_checkout sin consentimiento analítico');
+
+  // 7. Revocar publicitarias: recarga, sin TikTok, sin ttclid ni ad_consent y cookies eliminadas.
+  await saveChoice(false,false,{reload:true});s=await state(cp);
+  assert.deepEqual(s.globals,NONE);assert(!/_ttp|_tt_enable_cookie/.test(s.cookies),'Cookies de TikTok eliminadas');
+  assert.equal(await cp.evaluate(()=>sessionStorage.getItem('tt_sessionId')),null,'Identificadores de TikTok eliminados');
+  assert(!/ttclid|fbclid|gclid/.test(s.attribution),'Identificadores publicitarios eliminados del almacenamiento');
+  assertLinks(s,{ga:false,ads:false},'revocación publicitaria');
+
+  // 8 y 14. Varios cambios seguidos sin duplicar etiquetas, configuraciones ni page.
+  await saveChoice(true,false);await saveChoice(true,true);await saveChoice(true,true);
+  await openSettings();await cp.locator('[data-consent="accept"]').click();await cp.waitForTimeout(300);
+  s=await state(cp);
+  assert.equal(loads,2,'Solo las revocaciones recargaron la página');
+  assert.equal(s.scripts.filter(u=>u===GA_TAG).length,1);assert.equal(s.scripts.filter(u=>/clarity/.test(u)).length,1);assert.equal(s.scripts.filter(u=>/tiktok/.test(u)).length,1);
+  assert.equal(s.configs,1,'Una sola configuración de GA4 (un page_view)');assert.equal(s.ttPages,1,'Un solo page de TikTok');
+  assertLinks(s,{ga:true,ads:true},'cambios sucesivos');
+  // Escape cierra la configuración sin cambios y devuelve el foco al pie.
+  await openSettings();await cp.keyboard.press('Escape');
+  assert(!(await cp.locator('#cookie-banner').isVisible())&&await cp.locator('[data-consent-open]').evaluate(e=>e===document.activeElement),'Escape cierra y devuelve el foco');
+
+  // 2, 9 y 12. Aceptar todas y recargar: todo cargado una vez; parámetros finales de ambos checkouts.
+  await cp.reload();await cp.waitForTimeout(300);s=await state(cp);
+  assert(!s.banner);assert.deepEqual(s.globals,['function','object','function']);assert.equal(s.configs,1);assert.equal(s.ttPages,1);
+  assertLinks(s,{ga:true,ads:true},'aceptar todas tras recargar');
+  for(const selector of ['a[data-checkout="mercado_pago"]','a[data-checkout="paypal"]']){
+   await clickWithoutLeaving(selector);
+  }
+  s=await state(cp);assert.equal(s.beginCheckouts,2,'Un begin_checkout por clic');assert.equal(s.ttTracks,2,'Un InitiateCheckout por clic');
+  await Promise.all([cp.waitForURL(url=>url.href.startsWith(SYSTEME+'/checkout?')),cp.locator('a[data-checkout="paypal"]').click()]);
+  assert.equal(base(checkoutVisits.at(-1)),CHECKOUTS[1]);assertLink(checkoutVisits.at(-1),{ga:true,ads:true},'navegación PayPal');
+  cp.off('load',countLoads);
+
+  // 10. Aceptar y comprar de inmediato: se espera a GA4 (máximo 1 s) y el checkout lleva todo.
+  await reset();gaMode={delay:400};await cp.goto(LANDING+QUERY);
+  await cp.locator('[data-consent="accept"]').click();
+  let started=Date.now();
+  await Promise.all([cp.waitForURL(SYSTEME+'/**'),cp.locator('a[data-checkout="mercado_pago"]').click()]);
+  assert(Date.now()-started<1600,'Espera acotada');
+  assert.equal(base(checkoutVisits.at(-1)),CHECKOUTS[0]);assertLink(checkoutVisits.at(-1),{ga:true,ads:true},'compra inmediata');
+  // GA4 lento: se navega a 1 s sin identificadores (nunca se inventan).
+  await reset();gaMode={delay:5000};await cp.goto(LANDING+QUERY);
+  await cp.locator('[data-consent="accept"]').click();started=Date.now();
+  await Promise.all([cp.waitForURL(SYSTEME+'/**'),cp.locator('a[data-checkout="mercado_pago"]').click()]);
+  const waited=Date.now()-started;assert(waited>=900&&waited<2000,'Espera máxima de 1 s: '+waited);
+  let p=params(checkoutVisits.at(-1));assert(!('ga_client_id' in p)&&p.ad_consent==='granted'&&p.ttclid===TTCLID,'Sin identificadores GA4 inventados');
+  // GA4 bloqueado: no se espera.
+  await reset();gaMode={block:true};await cp.goto(LANDING+QUERY);
+  await cp.locator('[data-consent="accept"]').click();await cp.waitForTimeout(300);started=Date.now();
+  await Promise.all([cp.waitForURL(SYSTEME+'/**'),cp.locator('a[data-checkout="mercado_pago"]').click()]);
+  assert(Date.now()-started<700,'GA4 bloqueado: navegación sin espera');
+
+  // Preferencia vencida (más de 6 meses) o inválida: banner, todo denegado y restos limpiados.
+  for(const value of [JSON.stringify({v:1,analytics:true,ads:true,ts:new Date(Date.now()-190*86400000).toISOString()}),'{roto',JSON.stringify({v:2,analytics:true,ads:true,ts:new Date().toISOString()})]){
+   await reset();await cp.evaluate(v=>{localStorage.setItem('ptr_consent',v);document.cookie='_ga=GA1.1.1.2; path=/';document.cookie='_ttp=viejo; path=/';},value);
+   await cp.goto(LANDING+QUERY);await cp.waitForTimeout(300);s=await state(cp);
+   assert(s.banner&&s.globals.join()===NONE.join()&&trackerRequests.length===0,'Decisión no válida: banner y nada cargado');
+   assert(!/_ga=|_ttp/.test(s.cookies),'Restos de cookies limpiados');
+  }
+
+  // Cambio en otra pestaña: la otra página aplica la elección sin recargar.
+  await reset();const other=await ctx.newPage();await other.goto(LANDING+QUERY);await cp.goto(LANDING+QUERY);
+  await cp.locator('[data-consent="accept"]').click();await other.waitForTimeout(400);
+  const otherState=await state(other);assert(!otherState.banner&&otherState.globals.join()==='function,object,function','Otra pestaña aplica la elección');
+  await other.close();
+  // El único error esperado es el bloqueo simulado de gtag.js.
+  assert.deepEqual(consentErrors.filter(m=>!(m.includes('ERR_BLOCKED_BY_CLIENT')&&m.endsWith(' @ '+GA_TAG))),[],'Sin errores durante las pruebas de consentimiento');
+  await ctx.close();
+
+  // 15. localStorage no disponible: banner, denegación por defecto y la página sigue funcionando.
+  const noStorage=await browser.newContext({reducedMotion:'reduce',viewport:{width:390,height:844}});await noStorage.route('**/*',consentRoute);
+  await noStorage.addInitScript(()=>{Object.defineProperty(window,'localStorage',{configurable:true,get(){throw new DOMException('Almacenamiento bloqueado','SecurityError');}});});
+  const ns=await noStorage.newPage();const nsErrors=[];ns.on('pageerror',e=>nsErrors.push(e.message));
+  trackerRequests.length=0;gaMode={delay:50};
+  await ns.goto(LANDING+QUERY);await ns.waitForTimeout(300);
+  s=await state(ns);assert(s.banner&&s.globals.join()===NONE.join()&&trackerRequests.length===0,'Sin localStorage: denegado por defecto');
+  assertLinks(s,{ga:false,ads:false},'sin localStorage');
+  await ns.locator('[data-consent="accept"]').click();await ns.waitForTimeout(400);s=await state(ns);
+  assert(!s.banner&&s.globals.join()==='function,object,function','Sin localStorage: la elección vale para la página abierta');
+  await ns.reload();await ns.waitForTimeout(300);s=await state(ns);
+  assert(s.banner&&s.globals.join()===NONE.join(),'Sin localStorage: al recargar se vuelve a preguntar');
+  assert(await ns.locator('.menu-toggle').count()===1&&(await ns.locator('h1').count())===1,'La página sigue funcionando');
+  assert.deepEqual(nsErrors,[],'Sin errores sin localStorage');
+  await noStorage.close();
+  results.push({cookies:'Primera visita, aceptar, rechazar, solo analíticas, solo publicitarias, revocaciones con limpieza, cambios sucesivos sin duplicados, recarga, compra inmediata (espera ≤1 s), GA4 lento y bloqueado, UTM/ttclid, ambos checkouts, decisión vencida o inválida, otra pestaña y localStorage bloqueado.'});
+ }
  fs.writeFileSync(path.join(output,'resultados.json'),JSON.stringify(results,null,2));
  console.log(JSON.stringify(results));await browser.close();server.close();
 })().catch(async e=>{console.error(e);await auditBrowser?.close();server.close();process.exit(1)});
