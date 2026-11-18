@@ -67,7 +67,7 @@
 // - ad_consent=granted solo con consentimiento publicitario vigente; nunca se guarda.
 (() => {
   'use strict';
-  const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+  const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id'];
   const AD_KEYS = ['ttclid', 'fbclid', 'gclid'];
   const STORAGE_KEY = 'ptr_attribution';
   const MAX_LENGTH = 500;
