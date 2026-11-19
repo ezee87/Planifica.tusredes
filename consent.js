@@ -1,16 +1,18 @@
-// Consentimiento de cookies (Consent Mode básico).
-// GA4, Microsoft Clarity y el píxel de TikTok NO se descargan ni se ejecutan hasta que la persona
-// acepta la categoría correspondiente. Sin una decisión válida, todo lo opcional queda denegado.
+// Consentimiento de cookies. GA4 admite Consent Mode avanzado y Clarity consentv2 sin cookies.
+// Se inicializan sin cookies y actualizan su comportamiento con la elección del visitante.
+// Estos modos técnicos no constituyen por sí mismos una exención legal de consentimiento.
+// TikTok envía la visita inicial antes de elegir, salvo rechazo guardado. Sus cookies propias
+// y los eventos de compra del navegador requieren aceptación; rechazar detiene eventos futuros.
 // - Analíticas: Google Analytics 4 y Microsoft Clarity.
 // - Publicitarias: píxel de TikTok.
 // La elección se guarda en localStorage ("ptr_consent", versión y fecha) durante 6 meses.
 // Si localStorage falla, se aplica la denegación y la elección vale solo para la página abierta.
-// API para landing-final.js: window.ptrConsent.get(), onChange(fn), gaStatus() y open().
+// API para landing-final.js: get(), onChange(fn), gaStatus(), canMeasureGA() y open().
 // Va antes de landing-final.js (ambos con defer): así la API ya existe cuando se usa.
 (() => {
   'use strict';
   const STORAGE_KEY = 'ptr_consent';
-  const VERSION = 1;
+  const VERSION = 2; // volver a informar cuando cambia la política de medición sin cookies
   const MAX_AGE_MONTHS = 6;
   const GA_ID = 'G-CMX0YC67EN';
   const TIKTOK_PIXEL_ID = 'DBMH8CJC77U4J2JR0CI0';
@@ -20,8 +22,8 @@
   // Cookies e identificadores propios de cada herramienta, para limpiarlos al revocar.
   // Las cookies que cada proveedor guarda en su propio dominio no son accesibles desde aquí.
   const CLEANUP = {
-    analytics: {cookies: /^(?:_ga(?:_.+)?|_gid|_gat(?:_.+)?|_clck|_clsk)$/, storage: /^(?:_clck|_clsk)$/},
-    ads: {cookies: /^(?:_ttp|_tt_enable_cookie|ttcsid(?:_.+)?|_ttclid|ttclid)$/, storage: /^(?:tt_|_tt)/}
+    analytics: {cookies: /^(?:_ga(?:_.+)?|_gid|_gat(?:_.+)?|_clck|_clsk)$/, storage: /^(?:_clck|_clsk|_cltk)$/},
+    ads: {cookies: /^(?:_ttp|_tt_enable_cookie|ttcsid(?:_.+)?|_ttclid|ttclid)$/, storage: /^(?:tt_|_tt|ttcsid)/}
   };
 
   const read = () => {
@@ -54,6 +56,7 @@
   let decided = Boolean(stored);
   let current = stored || DENIED;
   const loaded = {ga: false, clarity: false, tiktok: false};
+  let tiktokSending = false;
   let gaStatus = 'idle'; // idle | loading | loaded | error
   const listeners = [];
 
@@ -62,6 +65,7 @@
     decided: () => decided,
     onChange: fn => { if (typeof fn === 'function') listeners.push(fn); },
     gaStatus: () => gaStatus,
+    canMeasureGA: () => loaded.ga,
     open: () => { if (ui) show(true, null); }
   });
 
@@ -77,7 +81,7 @@
   };
 
   const loadGA = () => {
-    if (loaded.ga) return;
+    if (loaded.ga || !cookiesProtected) return;
     loaded.ga = true;
     gaStatus = 'loading';
     window.dataLayer = window.dataLayer || [];
@@ -85,30 +89,80 @@
     // Estado predeterminado denegado antes de cualquier inicialización; luego, la elección.
     // Los permisos publicitarios de Google siguen denegados: el banner no los solicita.
     window.gtag('consent', 'default', {analytics_storage: 'denied', ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied'});
-    window.gtag('consent', 'update', {analytics_storage: 'granted'});
+    if (current.analytics) window.gtag('consent', 'update', {analytics_storage: 'granted'});
+    window.gtag('set', 'ads_data_redaction', true);
+    window.gtag('set', 'url_passthrough', false);
     window.gtag('js', new Date());
-    window.gtag('config', GA_ID);
+    // Una sola configuración: el page_view inicial no se repite al cambiar el consentimiento.
+    window.gtag('config', GA_ID, {allow_google_signals: false, allow_ad_personalization_signals: false});
     inject('https://www.googletagmanager.com/gtag/js?id=' + GA_ID, () => { gaStatus = 'loaded'; }, () => { gaStatus = 'error'; });
   };
 
   const loadClarity = () => {
-    if (loaded.clarity) return;
+    if (loaded.clarity || !cookiesProtected) return;
     loaded.clarity = true;
-    window.clarity = window.clarity || function () { (window.clarity.q = window.clarity.q || []).push(arguments); };
+    window.clarity = window.clarity || function () {
+      // El tag antepone start a la cola y puede traer track:true desde el proyecto.
+      // Arrancar sin cookies evita escribirlas antes de procesar consentv2.
+      // La API de consentimiento habilita después el almacenamiento si corresponde.
+      if (arguments[0] === 'start' && arguments[1]) arguments[1].track = false;
+      (window.clarity.q = window.clarity.q || []).push(arguments);
+    };
+    // Encolar la decisión ANTES de descargar el script, también para visitas fuera de Europa.
+    window.clarity('consentv2', {ad_Storage: 'denied', analytics_Storage: current.analytics ? 'granted' : 'denied'});
     inject('https://www.clarity.ms/tag/' + CLARITY_ID);
-    // Señal de consentimiento para Clarity: analítica concedida, publicidad de Microsoft denegada.
-    window.clarity('consentv2', {ad_Storage: 'denied', analytics_Storage: 'granted'});
   };
 
-  // Código base oficial del píxel de TikTok, ejecutado solo con consentimiento publicitario.
+  // TikTok puede volver a escribir ttcsid después de revokeConsent/disableCookie.
+  // Un SDK lento también puede procesar un permiso antiguo después de haber sido revocado.
+  // Proteger solo las cookies opcionales conocidas evita escrituras sin permiso vigente.
+  const protectOptionalCookies = () => {
+    let owner = document, descriptor;
+    while (owner && !descriptor) { descriptor = Object.getOwnPropertyDescriptor(owner, 'cookie'); owner = Object.getPrototypeOf(owner); }
+    if (!descriptor || !descriptor.get || !descriptor.set) return false;
+    try {
+      Object.defineProperty(document, 'cookie', {
+        configurable: true,
+        get: () => descriptor.get.call(document),
+        set: value => {
+          const cookie = String(value);
+          const entry = cookie.split(';')[0];
+          const separator = entry.indexOf('=');
+          const name = entry.slice(0, separator).trim();
+          // Permitir borrados (valor vacío), pero no nuevos identificadores si se revocó.
+          const denied = (!current.ads && CLEANUP.ads.cookies.test(name)) || (!current.analytics && CLEANUP.analytics.cookies.test(name));
+          if (denied && entry.slice(separator + 1).trim()) return;
+          descriptor.set.call(document, cookie);
+        }
+      });
+      // El SDK también guarda identificadores tt_* en sessionStorage antes de enviar la visita.
+      const setItem = Storage.prototype.setItem;
+      Object.defineProperty(Storage.prototype, 'setItem', {
+        configurable: true,
+        writable: true,
+        value: function (key, value) {
+          const denied = (!current.ads && CLEANUP.ads.storage.test(String(key))) || (!current.analytics && CLEANUP.analytics.storage.test(String(key)));
+          if (!denied) return setItem.call(this, key, value);
+        }
+      });
+      return true;
+    } catch (e) { return false; }
+  };
+  const cookiesProtected = protectOptionalCookies();
+
+  // Arranque inmediato de TikTok: no inventar grantConsent antes de que la persona acepte.
+  // disableCookie limita sus cookies; no convierte el envío de datos en una exención legal.
   const loadTikTok = () => {
-    if (loaded.tiktok) return;
+    if (loaded.tiktok || !cookiesProtected) return;
     loaded.tiktok = true;
+    tiktokSending = true;
     !function (w, d, t) {
       w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(
       var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var r="https://analytics.tiktok.com/i18n/pixel/events.js",o=n&&n.partner;ttq._i=ttq._i||{},ttq._i[e]=[],ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};n=d.createElement("script")
       ;n.type="text/javascript",n.async=!0,n.src=r+"?sdkid="+e+"&lib="+t;e=d.getElementsByTagName("script")[0];e.parentNode.insertBefore(n,e)};
       ttq.load(TIKTOK_PIXEL_ID);
+      if (current.ads) ttq.grantConsent();
+      else ttq.disableCookie();
       ttq.page();
     }(window, document, 'ttq');
   };
@@ -139,42 +193,53 @@
     });
   };
 
-  // Detiene de inmediato lo que esté cargado en esta página (después se recarga igual).
+  // Actualiza las APIs sin recargar la página ni repetir PageView.
   const stop = category => {
     try {
       if (category === 'analytics') {
         if (loaded.ga) {
-          window['ga-disable-' + GA_ID] = true; // corte oficial de envíos de GA4
           window.gtag('consent', 'update', {analytics_storage: 'denied'});
         }
-        if (loaded.clarity) window.clarity('consentv2', {ad_Storage: 'denied', analytics_Storage: 'denied'});
+        if (loaded.clarity) {
+          window.clarity('consentv2', {ad_Storage: 'denied', analytics_Storage: 'denied'});
+        }
       } else if (loaded.tiktok && window.ttq) {
         window.ttq.revokeConsent();
         window.ttq.disableCookie();
+        tiktokSending = false;
       }
     } catch (e) { /* la limpieza continúa igual */ }
     clean(category);
   };
 
   const apply = next => {
+    const previous = current;
     current = {analytics: Boolean(next.analytics), ads: Boolean(next.ads)};
-    if (!current.analytics) stop('analytics');
-    if (!current.ads) stop('ads');
-    // Una herramienta ya ejecutada no puede descargarse: recargar garantiza que no envíe nada más.
-    const mustReload = (!current.analytics && (loaded.ga || loaded.clarity)) || (!current.ads && loaded.tiktok);
-    if (!mustReload) {
-      if (current.analytics) { loadGA(); loadClarity(); }
-      if (current.ads) loadTikTok();
+    if (previous.analytics !== current.analytics) {
+      if (!current.analytics) stop('analytics');
+      else {
+        if (loaded.ga) {
+          window.gtag('consent', 'update', {analytics_storage: 'granted'});
+        } else loadGA();
+        if (loaded.clarity) {
+          window.clarity('consentv2', {ad_Storage: 'denied', analytics_Storage: 'granted'});
+        } else loadClarity();
+      }
+    }
+    if (!current.ads && tiktokSending) stop('ads');
+    else if (previous.ads !== current.ads && current.ads) {
+      if (loaded.tiktok) { window.ttq.enableCookie(); window.ttq.grantConsent(); tiktokSending = true; }
+      else loadTikTok();
     }
     listeners.forEach(fn => { try { fn(window.ptrConsent.get()); } catch (e) { /* un oyente no frena a los demás */ } });
-    if (mustReload) location.reload();
   };
 
   // Estado inicial: lo denegado se limpia (restos de una decisión vencida o revocada).
   if (!current.analytics) clean('analytics');
   if (!current.ads) clean('ads');
-  if (current.analytics) { loadGA(); loadClarity(); }
-  if (current.ads) loadTikTok();
+  loadGA();
+  loadClarity();
+  if (current.ads || !decided) loadTikTok();
 
   // Cambio de elección en otra pestaña del mismo sitio.
   window.addEventListener('storage', event => {
@@ -199,7 +264,7 @@
 
   // Reserva espacio al final de la página para que el banner no tape el pie.
   const reserveSpace = () => {
-    document.documentElement.style.setProperty('--cookie-space', banner.hidden ? '0px' : banner.offsetHeight + 24 + 'px');
+    document.documentElement.style.setProperty('--cookie-space', banner.hidden ? '0px' : banner.offsetHeight + 8 + 'px');
   };
 
   const expand = open => {

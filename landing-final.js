@@ -2,8 +2,7 @@
 // enlace de checkout de Systeme.io. Precio y moneda salen de los data-checkout-* de cada enlace,
 // junto al texto visible. Nunca se frena la navegación: si la analítica falla, el enlace sigue.
 // Va antes del menú para que un error allí no impida medir.
-// Cada evento exige el consentimiento vigente de su categoría (consent.js): sin él no se envía,
-// aunque la herramienta se haya cargado antes en la misma página.
+// GA4 respeta Consent Mode (limitado si está habilitado); TikTok exige consentimiento publicitario.
 (() => {
   'use strict';
   const PRODUCT_ID = 'planifica_tus_redes';
@@ -28,7 +27,7 @@
     const granted = consent();
 
     try {
-      if (granted.analytics && typeof window.gtag === 'function') {
+      if (window.ptrConsent && window.ptrConsent.canMeasureGA() && typeof window.gtag === 'function') {
         window.gtag('event', 'begin_checkout', {
           currency,
           value,
@@ -134,18 +133,21 @@
   };
   let gaPending = 0;
   let gaRequested = false;
+  let gaGeneration = 0;
   const waiters = [];
   const release = () => { if (gaPending === 0) waiters.splice(0).forEach(fn => fn()); };
   // Se piden una vez por página: al cargar o cuando se acepta después (consent.js carga GA4
-  // antes de avisar el cambio, así gtag ya existe). Una revocación recarga la página.
+  // antes de avisar el cambio, así gtag ya existe). Al revocar, se invalidan los callbacks pendientes.
   const requestGaIds = () => {
     if (gaRequested || !consent().analytics || typeof window.gtag !== 'function') return;
     gaRequested = true;
+    const generation = gaGeneration;
     Object.keys(GA_FIELDS).forEach(field => {
       const [key, format] = GA_FIELDS[field];
       gaPending++;
       try {
         window.gtag('get', GA_ID, field, value => {
+          if (generation !== gaGeneration) return;
           // Valor ausente, inválido o no persistido: no se inventa ni se reutiliza uno anterior.
           const id = String(value);
           if (consent().analytics && format.test(id) && id === gaCookies()[field]) attribution[key] = id; else delete attribution[key];
@@ -161,10 +163,16 @@
 
   if (window.ptrConsent) {
     window.ptrConsent.onChange(granted => {
+      if (!granted.analytics) {
+        gaGeneration++;
+        gaRequested = false;
+        gaPending = 0;
+      }
       if (granted.ads) AD_KEYS.forEach(key => { if (fromUrl[key]) attribution[key] = fromUrl[key]; });
       enforce();
       save();
       applyAll();
+      release();
       requestGaIds();
     });
   }
