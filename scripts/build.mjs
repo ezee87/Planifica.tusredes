@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 const root=resolve(import.meta.dirname,'..');
 const forVercel=process.env.VERCEL==='1'||process.argv.includes('--vercel');
-const files=['index.html','commercial.js','commercial.css','audit-fixes.css','consent.js','consent.css','landing-final.js','design.css','design.js','contacto.html','contacto.css','contacto.js','favicon-32.png','favicon-192.png','apple-touch-icon.png','robots.txt','sitemap.xml',
+const files=['index.html','commercial.js','commercial.css','audit-fixes.css','analytics.js','landing-final.js','design.css','design.js','contacto.html','contacto.css','contacto.js','favicon-32.png','favicon-192.png','apple-touch-icon.png','robots.txt','sitemap.xml',
  ...readdirSync(resolve(root,'legal')).filter(x=>/\.(html|css)$/.test(x)).map(x=>'legal/'+x),
  ...readdirSync(resolve(root,'imagenes')).filter(x=>/\.webp$/.test(x)).map(x=>'imagenes/'+x),
  ...readdirSync(resolve(root,'fonts')).filter(x=>/\.woff2$/.test(x)).map(x=>'fonts/'+x),
@@ -22,13 +22,13 @@ for(const file of files.filter(x=>x.endsWith('.html'))){
 // Netlify inyecta el badge público dentro de un iframe srcdoc que hereda esta CSP.
 // Autorizar solo su contenido exacto evita el error sin permitir scripts inline genéricos.
 hashes.add("'sha256-BkKP2XO6WOEc3kXOiLr2ZoY83hamalKjPY9xBcbXVuw='");
-// GA4: etiqueta oficial y recolección estándar/regional, sin dominios de publicidad.
-// connect-src incluye solo www.google.com (no *.google.com): gtag.js reenvía ahí el mismo hit
-// (/g/collect) cuando google-analytics.com no responde; sin este host ese evento se pierde.
-// Clarity balancea la recolección entre subdominios; sus scripts usan dos hosts concretos.
-// En imágenes, permitir solo /collect: excluir /c.gif y c.bing.com evita sincronización
-// publicitaria de Microsoft incluso si el tag remoto intenta iniciarla por defecto.
-const csp=`default-src 'self'; script-src 'self' https://analytics.tiktok.com https://www.googletagmanager.com https://www.clarity.ms https://scripts.clarity.ms ${[...hashes].join(' ')}; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://*.clarity.ms/collect; font-src 'self'; connect-src 'self' https://analytics.tiktok.com https://analytics-ipv6.tiktokw.us https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://www.google.com https://*.clarity.ms/collect; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests`;
+// Medición sin consentimiento (GA4, Clarity, TikTok): la CSP debe dejar pasar sus scripts y su recolección.
+// GA4: gtag.js y recolección estándar/regional/de respaldo (www.google.com), incluidos subdominios
+// de google-analytics.com y analytics.google.com. Los hosts de publicidad de Google siguen fuera.
+// Clarity: scripts desde www/scripts.clarity.ms, recolección balanceada entre subdominios (*.clarity.ms),
+// sincronización con c.bing.com y worker blob: (Clarity comprime y envía desde un Web Worker).
+// TikTok: scripts y recolección en analytics.tiktok.com (más el host IPv6); imágenes de seguimiento incluidas.
+const csp=`default-src 'self'; script-src 'self' https://analytics.tiktok.com https://www.googletagmanager.com https://www.clarity.ms https://scripts.clarity.ms ${[...hashes].join(' ')}; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://www.google.com https://*.clarity.ms https://c.bing.com https://analytics.tiktok.com; font-src 'self'; connect-src 'self' https://analytics.tiktok.com https://analytics-ipv6.tiktokw.us https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://www.google.com https://*.clarity.ms https://c.bing.com; worker-src 'self' blob:; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests`;
 const configPath=resolve(root,'vercel.json');
 const config=JSON.parse(readFileSync(configPath,'utf8'));
 const vercelCsp=config.headers.find(rule=>rule.source==='/(.*)').headers.find(header=>header.key==='Content-Security-Policy');

@@ -14,31 +14,29 @@ npm test
 
 El build genera `dist/`, copia únicamente recursos públicos y calcula los hashes CSP de los scripts inline. La auditoría comprueba navegación, vistas móviles, páginas legales y el formulario con respuestas simuladas; guarda resultados en `auditoria/`. No envía consultas reales.
 
-## Consentimiento y medición
+## Medición
 
-El bloqueo anterior era Consent Mode básico: `consent.js` no descargaba GA4, Clarity ni TikTok hasta aceptar. Además, `begin_checkout` exigía consentimiento analítico y la revocación recargaba la página, reiniciando etiquetas y visitas.
+GA4 (`G-CMX0YC67EN`), Microsoft Clarity (`zcrndukdg8`) y el píxel de TikTok (`DBMH8CJC77U4J2JR0CI0`) se cargan y operan en cada visita, sin banner ni consentimiento previo. `analytics.js` los inicializa (va con `defer`, antes de `landing-final.js`):
 
-| Herramienta | Sin aceptar / al rechazar | Con consentimiento |
-| --- | --- | --- |
-| GA4 | Consent Mode avanzado: señales de `page_view` y `begin_checkout` sin cookies analíticas. | Cookies e identificadores reales de navegador y sesión; atribución al checkout existente. |
-| Clarity | Interacciones y visitas sin cookies persistentes; identificadores por página e informes limitados. | Cookies analíticas para reconocer sesiones y visitas recurrentes. |
-| TikTok Pixel | Sin decisión: arranque inmediato con cookies propias deshabilitadas y un `PageView`; el SDK genera `LandingPageView`. Un rechazo vigente impide cargarlo; rechazar en la página detiene eventos futuros. | Habilita cookies propias e `InitiateCheckout` por clic válido; doble clic deduplicado durante 2 segundos. Aceptar no repite la visita. |
+| Herramienta | Configuración |
+| --- | --- |
+| GA4 | `analytics_storage: granted` desde el inicio; `ad_storage`, `ad_user_data` y `ad_personalization` siguen en `denied` (no hay Google Ads). Un solo `config`, con la URL (y sus UTM) ya cargada. |
+| Clarity | `consentv2` con `ad_Storage` y `analytics_Storage` en `granted` antes de descargar el tag; `track` queda como lo define el proyecto. |
+| TikTok Pixel | `enableCookie()` y `grantConsent()` antes del primer `page()`. |
 
-GA4 y Clarity reciben permisos denegados antes de inicializarse. El tag real de Clarity puede anteponer un arranque con `track:true` a su cola: el cargador fuerza `track:false` y deja que `consentv2` habilite las cookies después. La CSP permite la recolección de Clarity exclusivamente en `/collect` y bloquea la sincronización publicitaria (`c.clarity.ms/c.gif`, `c.bing.com`). Ese bloqueo puede aparecer en la consola como una infracción CSP esperada; no bloquea la analítica. Los permisos publicitarios de Google y Microsoft permanecen denegados incluso al aceptar TikTok.
+`landing-final.js` envía `begin_checkout` (GA4) e `InitiateCheckout` (TikTok) al hacer clic en los botones de Mercado Pago y PayPal (doble clic deduplicado durante 2 segundos), y agrega al enlace de checkout de Systeme.io: UTM, `ttclid`, `fbclid`, `gclid`, `ad_consent=granted`, `ga_client_id` y `ga_session_id`. Si un clic ocurre antes de que GA4 entregue los identificadores, se espera como máximo 1 segundo y se navega igual.
 
-Los cambios de consentimiento no recargan ni reconfiguran las etiquetas. Al revocar se limpian cookies e identificadores accesibles, se invalidan respuestas GA4 pendientes y se actualizan ambos checkouts. Una nueva aceptación vuelve a solicitar los identificadores. La preferencia versión 2 dura seis meses y vuelve a mostrar el aviso a quienes tenían la política anterior.
+`Purchase` sigue exclusivamente en Apps Script, con su deduplicación existente.
 
-El SDK real de TikTok puede volver a escribir `ttcsid` durante interacciones posteriores a `revokeConsent()` y `disableCookie()`. Un SDK descargado con retraso también puede procesar un permiso que ya fue revocado. Por eso, antes de cargar las herramientas se protegen sus cookies opcionales conocidas y la escritura de sus identificadores locales: se permiten borrados y escrituras con consentimiento vigente, y se impide crear o recrear identificadores sin aceptación. Las demás cookies y claves conservan su acceso normal. Si el navegador no admite esa protección, las herramientas de medición no se inician. TikTok no recibe `grantConsent()` mientras el visitante no haya aceptado; el envío inicial usa el comportamiento de arranque inmediato del SDK.
+La CSP (`scripts/build.mjs` la genera y sincroniza en `vercel.json` y `_headers`) permite la recolección de las tres herramientas: subdominios de `google-analytics.com` y `analytics.google.com`, `*.clarity.ms` (incluido `c.clarity.ms/c.gif`), `c.bing.com`, `worker-src blob:` para Clarity y `analytics.tiktok.com`. Los scripts inline pasan solo por hash; no se usa `unsafe-inline` para scripts.
 
-`Purchase` sigue exclusivamente en Apps Script, con su deduplicación existente. No se cambiaron ese archivo, los destinos de Systeme.io, los IDs ni los contratos de GA4/TikTok Events API. `ga_client_id` y `ga_session_id` siguen viajando solo con consentimiento analítico; `ttclid`, `fbclid`, `gclid` y `ad_consent=granted`, solo con consentimiento publicitario. Las UTM conservan su flujo existente.
+Cómo comprobar cada una (en la landing publicada, desde un celular o con emulación móvil, abriéndola con `?utm_source=tiktok&utm_medium=paid&utm_campaign=prueba`):
 
-Sin cookies propias no significa sin tratamiento de datos ni una exención legal automática: Google, Microsoft y TikTok reciben información técnica y de uso. En TikTok, deshabilitar cookies propias no garantiza que el navegador omita cookies de terceros existentes. El envío inicial incluye la URL y sus parámetros y no equivale a una visita anónima. Esta configuración no certifica una base jurídica para todos los países. Tampoco recupera todos los usuarios, sesiones o conversiones observadas: el modelado de GA4 depende de la elegibilidad y el volumen de la propiedad; Clarity pierde continuidad entre páginas. Las compras sin los identificadores/consentimientos exigidos por el servidor mantienen las exclusiones existentes.
+- **GA4:** en Network, `g/collect` con `gcs=G101` y cookie `_ga`. Para DebugView, agregar `debug_mode` solo durante la prueba y quitarlo después.
+- **Clarity:** `clarity.ms/collect` responde 204 y aparecen las cookies `_clck` y `_clsk`; la sesión aparece en el panel de Clarity.
+- **TikTok:** `api/v2/pixel` con `LandingPageView` y `Pageview`, y `InitiateCheckout` al hacer clic en un botón de pago. Confirmar en TikTok Events Manager.
 
-Referencias oficiales: [Consent Mode de Google](https://developers.google.com/tag-platform/security/concepts/consent-mode), [API consentv2 de Clarity](https://learn.microsoft.com/en-us/clarity/setup-and-installation/clarity-consent-api-v2), [límites de Clarity sin cookies](https://learn.microsoft.com/en-us/clarity/setup-and-installation/clarity-without-cookie-consent), [consentimiento de TikTok Pixel](https://ads.tiktok.com/resources/help/article/how-to-use-cookies-with-tiktok-pixel) y [requisitos del modelado de GA4](https://support.google.com/analytics/answer/11161109?hl=en).
-
-`npm test` usa proveedores y checkouts simulados e intercepta las solicitudes externas. Cubre la primera visita, decisiones por categoría, revocación y nueva aceptación, duplicaciones, callbacks tardíos, atribución, almacenamiento bloqueado, accesibilidad y anchos de 320 a 1920 px. No confirma recepción en los paneles de producción ni modifica servicios externos.
-
-La verificación adicional usa los scripts oficiales descargados de GA4, Clarity y TikTok e intercepta toda recolección. Comprueba `LandingPageView` y `Pageview` reales de TikTok antes de aceptar, ausencia de cookies propias e identificadores locales, señales GA4 con `gcs=G100`, y ausencia de solicitudes nuevas a TikTok después de rechazar e interactuar. También comprueba que aceptar no repita la visita y que un doble clic posterior produzca un solo InitiateCheckout. Los borrados de cookies que realiza `disableCookie()` están permitidos. El detalle local está en `auditoria/vendor-results.json` (ignorado por Git). Las 30 pruebas en memoria de `runAllTests()` del Apps Script existente también se verifican sin enviar compras reales.
+`npm test` usa proveedores y checkouts simulados e intercepta las solicitudes externas. Cubre la medición en la primera visita sin banner, `begin_checkout` e `InitiateCheckout` por clic, la atribución a ambos checkouts, GA4 lento o bloqueado, almacenamiento bloqueado, la CSP, accesibilidad y anchos de 320 a 1920 px. No confirma recepción en los paneles de producción ni modifica servicios externos.
 
 ## Publicación en Netlify
 

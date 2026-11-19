@@ -2,14 +2,12 @@
 // enlace de checkout de Systeme.io. Precio y moneda salen de los data-checkout-* de cada enlace,
 // junto al texto visible. Nunca se frena la navegación: si la analítica falla, el enlace sigue.
 // Va antes del menú para que un error allí no impida medir.
-// GA4 respeta Consent Mode (limitado si está habilitado); TikTok exige consentimiento publicitario.
 (() => {
   'use strict';
   const PRODUCT_ID = 'planifica_tus_redes';
   const PRODUCT_NAME = 'Planifica tus redes';
   const DEDUPE_MS = 2000; // ignora el doble clic, permite reintentos posteriores
   const lastClick = new WeakMap();
-  const consent = () => (window.ptrConsent ? window.ptrConsent.get() : {analytics: false, ads: false});
 
   document.addEventListener('click', event => {
     if (!event.isTrusted) return;
@@ -24,10 +22,9 @@
     const value = Number(link.dataset.checkoutValue);
     if (!method || !currency || !Number.isFinite(value)) return;
     const eventId = 'ic_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-    const granted = consent();
 
     try {
-      if (window.ptrConsent && window.ptrConsent.canMeasureGA() && typeof window.gtag === 'function') {
+      if (typeof window.gtag === 'function') {
         window.gtag('event', 'begin_checkout', {
           currency,
           value,
@@ -38,7 +35,7 @@
     } catch (e) { /* la analítica nunca bloquea el pago */ }
 
     try {
-      if (granted.ads && window.ttq && typeof window.ttq.track === 'function') {
+      if (window.ttq && typeof window.ttq.track === 'function') {
         window.ttq.track('InitiateCheckout', {
           contents: [{content_id: PRODUCT_ID, content_type: 'product', content_name: PRODUCT_NAME, quantity: 1, price: value}],
           content_type: 'product',
@@ -55,15 +52,10 @@
 // (misma pestaña) y los agrega a los enlaces de checkout de Systeme.io. Solo se tocan esos
 // enlaces; se usa set() para no duplicar y se conservan los parámetros propios del destino.
 // Se aplica al cargar, así también funcionan Ctrl+clic, clic central y "abrir en pestaña nueva".
-// También agrega ga_client_id y ga_session_id, leídos solo con gtag('get') (nunca de la URL).
-// Como llegan de forma asíncrona, los enlaces se reescriben al recibirlos; si un clic normal
-// ocurre antes, se espera como máximo GA_WAIT_MS y se navega igual. Sin GA no se agrega nada.
-// Consentimiento (consent.js), revisado en cada cambio:
-// - Las UTM se conservan siempre: son necesarias para registrar el origen comercial de la compra.
-// - ttclid, fbclid y gclid solo se guardan y transmiten con consentimiento publicitario; hasta
-//   entonces quedan en memoria (los de la URL actual) y nunca en el almacenamiento.
-// - ga_client_id y ga_session_id solo con consentimiento analítico.
-// - ad_consent=granted solo con consentimiento publicitario vigente; nunca se guarda.
+// Se agregan siempre: UTM, ttclid, fbclid, gclid, ad_consent=granted, ga_client_id y ga_session_id.
+// Estos dos últimos se leen solo con gtag('get') (nunca de la URL). Como llegan de forma asíncrona,
+// los enlaces se reescriben al recibirlos; si un clic normal ocurre antes, se espera como máximo
+// GA_WAIT_MS y se navega igual. Sin GA no se agrega nada.
 (() => {
   'use strict';
   const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id'];
@@ -75,7 +67,6 @@
   const GA_WAIT_MS = 1000;
   const AD_CONSENT_PARAM = 'ad_consent';
   const AD_CONSENT_GRANTED = 'granted';
-  const consent = () => (window.ptrConsent ? window.ptrConsent.get() : {analytics: false, ads: false});
 
   let stored = {};
   try { stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { stored = {}; }
@@ -86,22 +77,12 @@
     if (value && value.length <= MAX_LENGTH) fromUrl[key] = value;
   });
   const attribution = {};
-  const restore = keys => keys.forEach(key => {
+  UTM_KEYS.concat(AD_KEYS).forEach(key => {
     if (typeof stored[key] === 'string' && stored[key]) attribution[key] = stored[key];
     if (fromUrl[key]) attribution[key] = fromUrl[key];
   });
-  const initial = consent();
-  restore(UTM_KEYS);
-  if (initial.ads) restore(AD_KEYS);
-  if (initial.analytics) Object.values(GA_FIELDS).forEach(([key, format]) => { if (format.test(stored[key])) attribution[key] = stored[key]; });
-  // Quita lo que el consentimiento vigente no permite (también lo guardado antes de revocar).
-  const enforce = () => {
-    const granted = consent();
-    if (!granted.ads) AD_KEYS.forEach(key => delete attribution[key]);
-    if (!granted.analytics) Object.values(GA_FIELDS).forEach(([key]) => delete attribution[key]);
-  };
+  Object.values(GA_FIELDS).forEach(([key, format]) => { if (format.test(stored[key])) attribution[key] = stored[key]; });
   const save = () => { try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(attribution)); } catch (e) { /* sin storage: solo esta página */ } };
-  enforce();
   save();
 
   // Enlaces de checkout con su href original, para reconstruirlos siempre desde el destino real.
@@ -115,7 +96,7 @@
   const apply = link => {
     const url = new URL(checkouts.get(link));
     Object.keys(attribution).forEach(key => url.searchParams.set(key, attribution[key]));
-    if (consent().ads) url.searchParams.set(AD_CONSENT_PARAM, AD_CONSENT_GRANTED);
+    url.searchParams.set(AD_CONSENT_PARAM, AD_CONSENT_GRANTED);
     if (link.href !== url.href) link.href = url.href;
   };
   const applyAll = () => checkouts.forEach((_, link) => apply(link));
@@ -132,25 +113,18 @@
     };
   };
   let gaPending = 0;
-  let gaRequested = false;
-  let gaGeneration = 0;
   const waiters = [];
   const release = () => { if (gaPending === 0) waiters.splice(0).forEach(fn => fn()); };
-  // Se piden una vez por página: al cargar o cuando se acepta después (consent.js carga GA4
-  // antes de avisar el cambio, así gtag ya existe). Al revocar, se invalidan los callbacks pendientes.
   const requestGaIds = () => {
-    if (gaRequested || !consent().analytics || typeof window.gtag !== 'function') return;
-    gaRequested = true;
-    const generation = gaGeneration;
+    if (typeof window.gtag !== 'function') return;
     Object.keys(GA_FIELDS).forEach(field => {
       const [key, format] = GA_FIELDS[field];
       gaPending++;
       try {
         window.gtag('get', GA_ID, field, value => {
-          if (generation !== gaGeneration) return;
           // Valor ausente, inválido o no persistido: no se inventa ni se reutiliza uno anterior.
           const id = String(value);
-          if (consent().analytics && format.test(id) && id === gaCookies()[field]) attribution[key] = id; else delete attribution[key];
+          if (format.test(id) && id === gaCookies()[field]) attribution[key] = id; else delete attribution[key];
           save();
           applyAll();
           gaPending--;
@@ -161,25 +135,9 @@
   };
   requestGaIds();
 
-  if (window.ptrConsent) {
-    window.ptrConsent.onChange(granted => {
-      if (!granted.analytics) {
-        gaGeneration++;
-        gaRequested = false;
-        gaPending = 0;
-      }
-      if (granted.ads) AD_KEYS.forEach(key => { if (fromUrl[key]) attribution[key] = fromUrl[key]; });
-      enforce();
-      save();
-      applyAll();
-      release();
-      requestGaIds();
-    });
-  }
-
   const hasGaIds = () => Object.values(GA_FIELDS).every(([key]) => attribution[key]);
   // gtag.js no pudo descargarse (bloqueador o red): no tiene sentido esperar.
-  const gaBlocked = () => Boolean(window.ptrConsent && window.ptrConsent.gaStatus() === 'error');
+  const gaBlocked = () => Boolean(window.ptrAnalytics && window.ptrAnalytics.gaStatus() === 'error');
 
   let navigating = false;
   document.addEventListener('click', event => {
@@ -188,7 +146,7 @@
     if (navigating) { event.preventDefault(); return; }
     // Ctrl/Shift/Cmd+clic abren otra pestaña o ventana: no se pueden demorar; usan lo disponible.
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    if (!gaPending || hasGaIds() || !consent().analytics || gaBlocked()) return;
+    if (!gaPending || hasGaIds() || gaBlocked()) return;
     event.preventDefault();
     navigating = true;
     let done = false;
